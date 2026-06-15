@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EV Router — ירושלים</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --green:       #1D9E75;
+      --green-light: #E1F5EE;
+      --green-dark:  #0F6E56;
+      --red:         #E24B4A;
+      --red-light:   #FCEBEB;
+      --amber:       #EF9F27;
+      --amber-light: #FAEEDA;
+      --blue:        #3B8BD4;
+      --bg:          #F4F6F4;
+      --card:        #FFFFFF;
+      --text:        #1A1A18;
+      --muted:       #888780;
+      --border:      #E5E7E5;
+      --shadow:      0 2px 16px rgba(0,0,0,0.08);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Heebo', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; direction: rtl; }
+
+    /* ── טופ-בר ── */
+    .topbar { background: var(--green); padding: 1rem 1.25rem 1.25rem; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 12px rgba(29,158,117,0.3); }
+    .topbar-inner { max-width: 480px; margin: 0 auto; display: flex; align-items: center; gap: 10px; }
+    .logo { font-size: 1.3rem; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
+    .logo span { opacity: 0.75; font-weight: 400; font-size: 1rem; }
+    .admin-link { margin-right: auto; background: rgba(255,255,255,0.18); color: #fff; border: none; border-radius: 8px; padding: 5px 12px; font-family: 'Heebo', sans-serif; font-size: 0.8rem; cursor: pointer; text-decoration: none; display: flex; align-items: center; gap: 4px; }
+    .admin-link:hover { background: rgba(255,255,255,0.28); }
+
+    .page { max-width: 480px; margin: 0 auto; padding: 1.25rem; }
+
+    /* ── כרטיס ── */
+    .card { background: var(--card); border-radius: 16px; padding: 1.25rem; box-shadow: var(--shadow); margin-bottom: 1rem; }
+    .card-title { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 1rem; }
+
+    /* ── שדות ── */
+    .field-group { margin-bottom: 0.9rem; }
+    label { display: block; font-size: 0.82rem; font-weight: 500; color: var(--muted); margin-bottom: 5px; }
+    .input-wrap { position: relative; }
+    .input-icon { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 1rem; pointer-events: none; }
+    input[type="text"], input[type="number"], select {
+      width: 100%; padding: 10px 36px 10px 12px; border: 1.5px solid var(--border); border-radius: 10px;
+      font-family: 'Heebo', sans-serif; font-size: 0.92rem; color: var(--text); background: var(--bg);
+      transition: border-color 0.2s; -webkit-appearance: none;
+    }
+    input:focus, select:focus { outline: none; border-color: var(--green); background: #fff; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    /* ── מיקום + GPS ── */
+    .location-row { display: flex; gap: 8px; }
+    .location-row .autocomplete-wrap { flex: 1; }
+    .btn-gps {
+      flex-shrink: 0; width: 44px; height: 44px; background: var(--green-light);
+      border: 1.5px solid var(--green); border-radius: 10px; font-size: 1.1rem; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; transition: background 0.2s;
+    }
+    .btn-gps:hover { background: var(--green); }
+    .btn-gps.loading { animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.4} }
+    .location-status { font-size: 0.78rem; color: var(--green-dark); margin-top: 5px; padding: 4px 8px; background: var(--green-light); border-radius: 6px; }
+    .location-status.error { color: var(--red); background: var(--red-light); }
+
+    /* ── Autocomplete ── */
+    .autocomplete-wrap { position: relative; }
+    .suggestions-list {
+      position: absolute; top: 100%; right: 0; left: 0; z-index: 50;
+      background: var(--card); border: 1.5px solid var(--green); border-radius: 10px;
+      box-shadow: var(--shadow); max-height: 200px; overflow-y: auto; margin-top: 2px;
+    }
+    .suggestion-item { padding: 9px 12px; font-size: 0.85rem; cursor: pointer; border-bottom: 1px solid var(--border); line-height: 1.3; }
+    .suggestion-item:last-child { border-bottom: none; }
+    .suggestion-item:hover { background: var(--green-light); }
+
+    /* ── כפתור חיפוש ── */
+    .btn-search {
+      width: 100%; padding: 13px; background: var(--green); color: #fff; border: none; border-radius: 12px;
+      font-family: 'Heebo', sans-serif; font-size: 1rem; font-weight: 600; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      transition: background 0.2s, transform 0.1s; margin-top: 0.25rem;
+    }
+    .btn-search:hover { background: var(--green-dark); }
+    .btn-search:active { transform: scale(0.98); }
+    .btn-search:disabled { background: var(--muted); cursor: not-allowed; }
+    .spinner { width: 18px; height: 18px; border: 2.5px solid rgba(255,255,255,0.4); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── תוצאות ── */
+    #results { display: none; }
+    .recommended-banner { background: var(--green); color: #fff; border-radius: 12px 12px 0 0; padding: 10px 14px; font-size: 0.78rem; font-weight: 600; letter-spacing: 0.5px; display: flex; align-items: center; gap: 6px; }
+
+    .station-card {
+      background: var(--card); border-radius: 12px; padding: 1rem; margin-bottom: 0.75rem;
+      box-shadow: var(--shadow); border: 1.5px solid transparent; transition: border-color 0.2s, box-shadow 0.2s; cursor: pointer;
+    }
+    .station-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.12); }
+    .station-card.recommended { border-color: var(--green); border-radius: 0 0 12px 12px; margin-top: 0; }
+    .station-card.full { opacity: 0.6; }
+
+    .station-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+    .station-name { font-size: 0.95rem; font-weight: 600; line-height: 1.3; }
+    .station-dist { font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
+    .station-meta { font-size: 0.78rem; color: var(--muted); margin-bottom: 8px; }
+    .progress-track { background: var(--border); border-radius: 99px; height: 5px; margin-bottom: 5px; }
+    .progress-fill { height: 5px; border-radius: 99px; transition: width 0.6s ease; }
+    .station-footer { display: flex; align-items: center; justify-content: space-between; }
+    .load-text { font-size: 0.75rem; color: var(--muted); }
+
+    .badge { font-size: 0.7rem; font-weight: 600; padding: 2px 9px; border-radius: 99px; display: inline-flex; align-items: center; gap: 3px; }
+    .badge-green { background: var(--green-light); color: var(--green-dark); }
+    .badge-amber { background: var(--amber-light); color: #7A4E0A; }
+    .badge-red   { background: var(--red-light);   color: #7A1F1F; }
+    .badge-blue  { background: #E6F1FB; color: #185FA5; }
+    .badge-grey  { background: #F0F0F0; color: #666; }
+
+    /* ── זמן טעינה ── */
+    .charge-times { background: #F8FBF9; border-radius: 8px; padding: 8px 12px; margin-top: 8px; font-size: 0.78rem; border: 1px solid var(--green-light); }
+    .charge-times-title { font-weight: 600; color: var(--green-dark); margin-bottom: 5px; font-size: 0.75rem; }
+    .charge-row { display: flex; justify-content: space-between; padding: 2px 0; }
+    .charge-label { color: var(--muted); }
+    .charge-val { font-weight: 600; }
+
+    /* ── כפתור דיווח ── */
+    .btn-report {
+      font-size: 0.72rem; color: var(--muted); background: none; border: 1px solid var(--border);
+      border-radius: 6px; padding: 3px 8px; cursor: pointer; margin-top: 8px;
+      font-family: 'Heebo', sans-serif; transition: border-color 0.2s, color 0.2s;
+    }
+    .btn-report:hover { border-color: var(--green); color: var(--green-dark); }
+
+    /* ── Navigate ── */
+    .btn-navigate { width: 100%; padding: 13px; background: var(--green-dark); color: #fff; border: none; border-radius: 12px; font-family: 'Heebo', sans-serif; font-size: 0.95rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 0.5rem; transition: background 0.2s; }
+    .btn-navigate:hover { background: #0a5542; }
+
+    .no-results { text-align: center; padding: 2rem 1rem; color: var(--muted); }
+    .no-results-icon { font-size: 2.5rem; margin-bottom: 0.75rem; }
+    .no-results h3 { font-size: 1rem; color: var(--text); margin-bottom: 0.5rem; }
+
+    /* ── Bottom Sheet ── */
+    .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 200; align-items: flex-end; }
+    .overlay.open { display: flex; }
+    .sheet { background: var(--card); border-radius: 20px 20px 0 0; padding: 1.5rem 1.25rem; width: 100%; max-width: 480px; margin: 0 auto; animation: slideUp 0.28s ease; max-height: 85vh; overflow-y: auto; }
+    @keyframes slideUp { from { transform: translateY(60px); opacity: 0; } }
+    .sheet-handle { width: 36px; height: 4px; background: var(--border); border-radius: 99px; margin: 0 auto 1.25rem; }
+    .sheet-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.25rem; }
+    .sheet-sub { font-size: 0.82rem; color: var(--muted); margin-bottom: 1.25rem; }
+    .detail-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
+    .detail-row:last-of-type { border-bottom: none; }
+    .detail-label { color: var(--muted); }
+    .detail-value { font-weight: 500; }
+
+    /* ── דיאלוג דיווח ── */
+    .report-count-wrap { display: flex; align-items: center; gap: 12px; margin: 1rem 0; }
+    .count-btn { width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid var(--border); background: var(--bg); font-size: 1.2rem; cursor: pointer; display: flex; align-items: center; justify-content: center; font-family: 'Heebo', sans-serif; }
+    .count-btn:hover { border-color: var(--green); }
+    .count-display { flex: 1; text-align: center; font-size: 1.5rem; font-weight: 700; }
+    .btn-submit-report { width: 100%; padding: 13px; background: var(--green); color: #fff; border: none; border-radius: 12px; font-family: 'Heebo', sans-serif; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 0.5rem; }
+    .btn-submit-report:hover { background: var(--green-dark); }
+
+    .fade-in { animation: fadeIn 0.3s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } }
+    .section-label { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin: 1rem 0 0.5rem; }
+  </style>
+</head>
+<body>
+
+<!-- ── טופ-בר ── -->
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="logo">⚡ EV Router <span>ירושלים</span></div>
+    <a class="admin-link" href="/admin">🖥 מנהל</a>
+  </div>
+</div>
+
+<!-- ── גוף ── -->
+<div class="page">
+
+  <div class="card" style="margin-top:0.5rem">
+    <div class="card-title">🔍 חפש עמדת טעינה</div>
+
+    <!-- מיקום -->
+    <div class="field-group">
+      <label>מיקום נוכחי</label>
+      <div class="location-row">
+        <div class="autocomplete-wrap input-wrap">
+          <span class="input-icon">📍</span>
+          <input type="text" id="inp-address" placeholder="הזן כתובת... (לדוגמה: יפו 5)" autocomplete="off" oninput="onAddressInput()">
+          <div id="suggestions" class="suggestions-list" style="display:none"></div>
+        </div>
+        <button class="btn-gps" id="btn-gps" onclick="useGPS()" title="מיקום נוכחי">🎯</button>
+      </div>
+      <div id="location-status" class="location-status" style="display:none"></div>
+    </div>
+
+    <!-- סוללה -->
+    <div class="field-group">
+      <label>סוללה (אופציונלי — לחישוב זמן טעינה)</label>
+      <div class="two-col">
+        <div class="input-wrap">
+          <span class="input-icon">🔋</span>
+          <input type="number" id="inp-battery" min="1" max="99" placeholder="% נוכחי (לדוגמה: 20)">
+        </div>
+        <div class="input-wrap">
+          <span class="input-icon">⚡</span>
+          <input type="number" id="inp-kwh" min="10" max="200" placeholder="kWh (לדוגמה: 60)">
+        </div>
+      </div>
+    </div>
+
+    <!-- העדפה -->
+    <div class="field-group">
+      <label>העדפת טעינה</label>
+      <div class="input-wrap">
+        <span class="input-icon">🔌</span>
+        <select id="inp-pref">
+          <option value="any">כלשהי — מהירה או איטית</option>
+          <option value="fast">מהירה בלבד (DC)</option>
+          <option value="slow">איטית בלבד (AC)</option>
+        </select>
+      </div>
+    </div>
+
+    <button class="btn-search" id="btn-search" onclick="findStation()">
+      <span id="btn-text">חפש עמדה</span>
+      <div class="spinner" id="spinner"></div>
+    </button>
+  </div>
+
+  <!-- תוצאות -->
+  <div id="results" class="fade-in">
+    <div id="recommended-section"></div>
+    <div id="other-section"></div>
+    <div id="no-results" class="no-results" style="display:none">
+      <div class="no-results-icon">🔌</div>
+      <h3>לא נמצאו עמדות</h3>
+      <p>אין עמדות בטווח 5 ק"מ עם ההגדרות שבחרת.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Bottom Sheet: פרטי עמדה -->
+<div class="overlay" id="overlay" onclick="closeSheet(event)">
+  <div class="sheet" id="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="sheet-name"></div>
+    <div class="sheet-sub" id="sheet-sub"></div>
+    <div id="sheet-details"></div>
+    <button class="btn-navigate" id="btn-nav" onclick="openNav()">🗺 נווט לכאן</button>
+  </div>
+</div>
+
+<!-- דיאלוג דיווח עומס -->
+<div class="overlay" id="report-overlay" onclick="closeReportDialog(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">📊 דווח על עומס בתחנה</div>
+    <div class="sheet-sub" id="report-station-name"></div>
+    <p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.5rem">כמה רכבים נמצאים כרגע בתחנה (כולל אלה שטוענים)?</p>
+    <div class="report-count-wrap">
+      <button class="count-btn" onclick="changeCount(-1)">−</button>
+      <div class="count-display" id="report-count-display">0</div>
+      <button class="count-btn" onclick="changeCount(1)">+</button>
+    </div>
+    <p style="font-size:0.75rem;color:var(--muted);text-align:center;margin-bottom:0.75rem">הדיווח יעדכן את זמינות העמדות בזמן אמת</p>
+    <button class="btn-submit-report" onclick="submitReport()">✓ שלח דיווח</button>
+  </div>
+</div>
+
+<script>
+let currentStation = null;
+let currentLat = null;
+let currentLon = null;
+let currentSoc = 0;
+let reportStation = null;
+let reportCount = 0;
+let autocompleteTimer = null;
+let stationsMap = {};
+
+// ── סטטוס מיקום ──
+function setLocationStatus(msg, isError = false) {
+  const el = document.getElementById("location-status");
+  if (msg) {
+    el.style.display = "block";
+    el.textContent = msg;
+    el.className = "location-status" + (isError ? " error" : "");
+  } else {
+    el.style.display = "none";
+  }
+}
+
+// ── GPS ──
+function useGPS() {
+  const btn = document.getElementById("btn-gps");
+  if (!navigator.geolocation) { setLocationStatus("הדפדפן לא תומך ב-GPS", true); return; }
+  btn.classList.add("loading");
+  setLocationStatus("מחפש מיקום...");
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      currentLat = pos.coords.latitude;
+      currentLon = pos.coords.longitude;
+      document.getElementById("inp-address").value = "";
+      btn.classList.remove("loading");
+      setLocationStatus("📍 מיקום נוכחי התקבל");
+    },
+    () => {
+      btn.classList.remove("loading");
+      setLocationStatus("לא ניתן לקבל מיקום — נסי להזין כתובת", true);
+      currentLat = null; currentLon = null;
+    },
+    { timeout: 10000, maximumAge: 60000 }
+  );
+}
+
+// ── Autocomplete ──
+function onAddressInput() {
+  currentLat = null; currentLon = null;
+  setLocationStatus(null);
+  const q = document.getElementById("inp-address").value.trim();
+  clearTimeout(autocompleteTimer);
+  if (q.length < 2) { hideSuggestions(); return; }
+  autocompleteTimer = setTimeout(() => fetchSuggestions(q), 350);
+}
+
+async function fetchSuggestions(q) {
+  try {
+    const res = await fetch("/api/suggest?q=" + encodeURIComponent(q));
+    const data = await res.json();
+    showSuggestions(data);
+  } catch(e) { hideSuggestions(); }
+}
+
+function showSuggestions(results) {
+  const list = document.getElementById("suggestions");
+  list.innerHTML = "";
+  if (!results.length) { list.style.display = "none"; return; }
+  results.forEach(r => {
+    const item = document.createElement("div");
+    item.className = "suggestion-item";
+    item.textContent = r.display.split(",").slice(0, 3).join(", ");
+    item.onclick = () => selectSuggestion(r);
+    list.appendChild(item);
+  });
+  list.style.display = "block";
+}
+
+function selectSuggestion(r) {
+  currentLat = r.lat;
+  currentLon = r.lon;
+  const short = r.display.split(",").slice(0, 2).join(", ");
+  document.getElementById("inp-address").value = short;
+  hideSuggestions();
+  setLocationStatus("📍 " + short);
+}
+
+function hideSuggestions() {
+  document.getElementById("suggestions").style.display = "none";
+}
+
+document.addEventListener("click", (e) => {
+  if (!document.getElementById("inp-address").contains(e.target)) hideSuggestions();
+});
+
+// ── גיאוקודינג ──
+async function geocodeAddress(address) {
+  const res = await fetch("/api/geocode?q=" + encodeURIComponent(address));
+  if (!res.ok) throw new Error("geocode failed");
+  return await res.json();
+}
+
+// ── חישוב זמן טעינה ──
+function formatMinutes(mins) {
+  if (mins < 60) return mins + " דק'";
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m > 0 ? `${h}h ${m} דק'` : `${h} שעות`;
+}
+
+function calcChargingTime(socPct, isFast, batteryKwh) {
+  if (!batteryKwh || batteryKwh <= 0) batteryKwh = 60;
+  if (socPct >= 99) return "מלא";
+  if (isFast) {
+    const fastPower = 50;
+    if (socPct >= 80) {
+      const mins = Math.round((100 - socPct) / 100 * batteryKwh / (fastPower * 0.25) * 60);
+      return formatMinutes(mins) + " (מ-" + socPct + "% עד 100%)";
+    }
+    const mins = Math.round((80 - socPct) / 100 * batteryKwh / fastPower * 60);
+    return formatMinutes(mins) + " (עד 80%)";
+  } else {
+    const mins = Math.round((100 - socPct) / 100 * batteryKwh / 7.4 * 60);
+    return formatMinutes(mins) + " (עד 100%)";
+  }
+}
+
+function buildChargeTimes(s, socPct, batteryKwh) {
+  if (!socPct || isNaN(socPct) || socPct <= 0 || socPct >= 100) return "";
+  const rows = [];
+  if (s.fast > 0) {
+    rows.push(`<div class="charge-row"><span class="charge-label">⚡ מהיר DC (50 kW)</span><span class="charge-val">${calcChargingTime(socPct, true, batteryKwh)}</span></div>`);
+  }
+  if (s.slow > 0) {
+    rows.push(`<div class="charge-row"><span class="charge-label">🐢 איטי AC (7.4 kW)</span><span class="charge-val">${calcChargingTime(socPct, false, batteryKwh)}</span></div>`);
+  }
+  if (!rows.length) return "";
+  return `<div class="charge-times"><div class="charge-times-title">זמן טעינה משוער מ-${socPct}%</div>${rows.join("")}</div>`;
+}
+
+// ── חיפוש ──
+async function findStation() {
+  let lat = currentLat;
+  let lon = currentLon;
+
+  document.getElementById("btn-text").textContent = "מחפש...";
+  document.getElementById("spinner").style.display = "block";
+  document.getElementById("btn-search").disabled = true;
+  hideSuggestions();
+
+  try {
+    if (!lat || !lon) {
+      const address = document.getElementById("inp-address").value.trim();
+      if (!address) { alert("נא להזין כתובת או ללחוץ על 🎯 למיקום נוכחי"); return; }
+      document.getElementById("btn-text").textContent = "ממפה כתובת...";
+      const geo = await geocodeAddress(address);
+      if (geo.error) { alert("לא נמצאה כתובת — נסי לפרט יותר"); return; }
+      lat = geo.lat; lon = geo.lon;
+      const shortName = geo.display_name ? geo.display_name.split(",")[0] : address;
+      setLocationStatus("📍 " + shortName);
+    }
+
+    document.getElementById("btn-text").textContent = "מחשב...";
+    const pref = document.getElementById("inp-pref").value;
+    const res = await fetch("/api/find", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lat, lon, preference: pref })
+    });
+    const data = await res.json();
+
+    currentSoc = parseInt(document.getElementById("inp-battery").value) || 0;
+    const kwhVal = parseFloat(document.getElementById("inp-kwh").value) || 60;
+    renderResults(data, lat, lon, currentSoc, kwhVal);
+  } catch (e) {
+    alert("שגיאה בתקשורת עם השרת");
+  } finally {
+    document.getElementById("btn-text").textContent = "חפש עמדה";
+    document.getElementById("spinner").style.display = "none";
+    document.getElementById("btn-search").disabled = false;
+  }
+}
+
+// ── רינדור תוצאות ──
+function renderResults(data, userLat, userLon, socPct, batteryKwh) {
+  const results = document.getElementById("results");
+  results.style.display = "block";
+
+  const recSection = document.getElementById("recommended-section");
+  const otherSection = document.getElementById("other-section");
+  const noResults = document.getElementById("no-results");
+  recSection.innerHTML = ""; otherSection.innerHTML = "";
+  noResults.style.display = "none";
+
+  const stations = data.nearby_stations || [];
+  if (!stations.length) { noResults.style.display = "block"; return; }
+
+  stations.forEach(s => { stationsMap[s.id] = s; });
+
+  const recId = data.assignment?.station_id;
+  const recommended = stations.filter(s => s.id === recId);
+  const others = stations.filter(s => s.id !== recId);
+
+  if (recommended.length > 0) {
+    recSection.innerHTML = `<div class="recommended-banner">✦ מומלץ על ידי אלגוריתם Push-Relabel</div>`;
+    recSection.appendChild(buildStationCard(recommended[0], true, socPct, batteryKwh));
+  }
+
+  if (others.length > 0) {
+    const label = document.createElement("div");
+    label.className = "section-label";
+    label.textContent = "עמדות נוספות בטווח";
+    otherSection.appendChild(label);
+    others.forEach(s => otherSection.appendChild(buildStationCard(s, false, socPct, batteryKwh)));
+  }
+
+  results.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ── בניית כרטיס עמדה ──
+function buildStationCard(s, isRec, socPct, batteryKwh) {
+  const fillColor = s.fill_pct >= 100 ? "var(--red)" : s.fill_pct >= 50 ? "var(--amber)" : "var(--green)";
+
+  let badge;
+  if (!s.has_report) {
+    badge = `<span class="badge badge-grey">❓ לא ידוע</span>`;
+  } else if (s.fill_pct >= 100) {
+    badge = `<span class="badge badge-red">✗ מלא</span>`;
+  } else if (s.fill_pct >= 50) {
+    badge = `<span class="badge badge-amber">⚠ עמוס</span>`;
+  } else if (s.fill_pct > 0) {
+    badge = `<span class="badge badge-amber">~ חלקית</span>`;
+  } else {
+    badge = `<span class="badge badge-green">✓ פנוי</span>`;
+  }
+
+  const typeTag = s.fast > 0
+    ? `<span class="badge badge-blue">⚡ ${s.fast} DC</span>`
+    : `<span class="badge" style="background:#F5F5F5;color:#666">🐢 ${s.slow} AC</span>`;
+
+  const occupancyLine = s.has_report
+    ? `<div class="progress-track"><div class="progress-fill" style="width:${s.fill_pct}%;background:${fillColor}"></div></div>
+       <div class="station-footer">
+         <div class="load-text">עומס: ${s.fill_pct}% (${s.load}/${s.cap} רכבים)</div>
+         <div style="display:flex;gap:6px">${typeTag} ${badge}</div>
+       </div>`
+    : `<div class="station-footer">
+         <div class="load-text" style="color:var(--muted)">עומס לא ידוע</div>
+         <div style="display:flex;gap:6px">${typeTag} ${badge}</div>
+       </div>`;
+
+  const chargeTimes = buildChargeTimes(s, socPct, batteryKwh);
+
+  const card = document.createElement("div");
+  card.className = "station-card" + (isRec ? " recommended" : "") + (s.has_report && s.fill_pct >= 100 ? " full" : "");
+  card.innerHTML = `
+    <div class="station-header">
+      <div class="station-name">${s.name}</div>
+      <div class="station-dist">${s.dist} ק"מ</div>
+    </div>
+    <div class="station-meta">${s.operator} · ${s.cap} עמדות</div>
+    ${occupancyLine}
+    ${chargeTimes}
+    <button class="btn-report" onclick="event.stopPropagation();openReportDialog('${s.id}')">📊 דווח עומס</button>
+  `;
+  card.onclick = () => openSheet(s, socPct, batteryKwh);
+  return card;
+}
+
+// ── Bottom Sheet ──
+function openSheet(s, socPct, batteryKwh) {
+  currentStation = s;
+  document.getElementById("sheet-name").textContent = s.name;
+  document.getElementById("sheet-sub").textContent = s.operator + " · " + s.dist + " ק\"מ";
+
+  const fillColor = s.fill_pct >= 100 ? "var(--red)" : s.fill_pct >= 50 ? "var(--amber)" : "var(--green)";
+  const occupancyRow = s.has_report
+    ? `<div class="detail-row"><span class="detail-label">עומס מדווח</span><span class="detail-value" style="color:${fillColor}">${s.fill_pct}% (${s.load}/${s.cap})</span></div>`
+    : `<div class="detail-row"><span class="detail-label">עומס</span><span class="detail-value" style="color:var(--muted)">לא ידוע</span></div>`;
+
+  const chargeSection = (socPct && socPct > 0)
+    ? buildChargeTimes(s, socPct, batteryKwh || 60)
+    : `<p style="font-size:0.78rem;color:var(--muted);margin-top:10px">הכנסי % סוללה בחיפוש לחישוב זמן טעינה</p>`;
+
+  document.getElementById("sheet-details").innerHTML = `
+    <div class="detail-row"><span class="detail-label">עמדות מהירות (DC)</span><span class="detail-value">${s.fast}</span></div>
+    <div class="detail-row"><span class="detail-label">עמדות איטיות (AC)</span><span class="detail-value">${s.slow}</span></div>
+    <div class="detail-row"><span class="detail-label">קיבולת כוללת</span><span class="detail-value">${s.cap}</span></div>
+    ${occupancyRow}
+    <div class="detail-row"><span class="detail-label">מרחק ממני</span><span class="detail-value">${s.dist} ק"מ</span></div>
+    ${chargeSection}
+  `;
+  document.getElementById("overlay").classList.add("open");
+}
+
+function closeSheet(e) {
+  if (e.target === document.getElementById("overlay")) {
+    document.getElementById("overlay").classList.remove("open");
+  }
+}
+
+function openNav() {
+  if (!currentStation) return;
+  window.open(`https://waze.com/ul?ll=${currentStation.lat},${currentStation.lon}&navigate=yes`, "_blank");
+}
+
+// ── דיווח עומס ──
+function openReportDialog(stationId) {
+  const s = stationsMap[stationId];
+  if (!s) return;
+  reportStation = s;
+  reportCount = s.load || 0;
+  document.getElementById("report-station-name").textContent = s.name;
+  document.getElementById("report-count-display").textContent = reportCount;
+  document.getElementById("report-overlay").classList.add("open");
+}
+
+function changeCount(delta) {
+  reportCount = Math.max(0, Math.min(reportCount + delta, 50));
+  document.getElementById("report-count-display").textContent = reportCount;
+}
+
+function closeReportDialog(e) {
+  if (e.target === document.getElementById("report-overlay")) {
+    document.getElementById("report-overlay").classList.remove("open");
+  }
+}
+
+async function submitReport() {
+  if (!reportStation) return;
+  try {
+    await fetch("/api/report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ station_id: reportStation.id, count: reportCount })
+    });
+    document.getElementById("report-overlay").classList.remove("open");
+    alert(`תודה! הדיווח על "${reportStation.name}" נשמר.\nחפשי שוב לראות את העדכון.`);
+  } catch(e) {
+    alert("שגיאה בשמירת הדיווח");
+  }
+}
+</script>
+</body>
+</html>

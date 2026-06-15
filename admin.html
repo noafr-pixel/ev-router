@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EV Router — דשבורד מנהל</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --green:       #1D9E75;
+      --green-light: #E1F5EE;
+      --green-dark:  #0F6E56;
+      --red:         #E24B4A;
+      --red-light:   #FCEBEB;
+      --amber:       #EF9F27;
+      --amber-light: #FAEEDA;
+      --blue:        #3B8BD4;
+      --blue-light:  #E6F1FB;
+      --bg:          #F0F2F0;
+      --card:        #FFFFFF;
+      --text:        #1A1A18;
+      --muted:       #888780;
+      --border:      #E5E7E5;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Heebo', sans-serif; background: var(--bg); color: var(--text); direction: rtl; }
+
+    /* ── Topbar ── */
+    .topbar {
+      background: #1A2E25;
+      padding: 0.85rem 1.5rem;
+      display: flex; align-items: center; gap: 12px;
+      position: sticky; top: 0; z-index: 100;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .logo { font-size: 1.1rem; font-weight: 700; color: #fff; }
+    .logo span { color: var(--green); }
+    .topbar-sub { font-size: 0.78rem; color: rgba(255,255,255,0.5); }
+    .topbar-spacer { flex: 1; }
+    .btn-run {
+      background: var(--green);
+      color: #fff; border: none;
+      border-radius: 9px; padding: 8px 18px;
+      font-family: 'Heebo', sans-serif;
+      font-size: 0.9rem; font-weight: 600;
+      cursor: pointer; display: flex; align-items: center; gap: 7px;
+      transition: background 0.2s;
+    }
+    .btn-run:hover { background: var(--green-dark); }
+    .btn-run:disabled { background: var(--muted); cursor: not-allowed; }
+    .pref-select {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff; border-radius: 8px;
+      padding: 6px 10px;
+      font-family: 'Heebo', sans-serif; font-size: 0.82rem;
+    }
+    .pref-select option { background: #1A2E25; }
+    .driver-link {
+      color: rgba(255,255,255,0.65);
+      font-size: 0.8rem; text-decoration: none;
+      background: rgba(255,255,255,0.08);
+      padding: 5px 12px; border-radius: 8px;
+    }
+    .driver-link:hover { background: rgba(255,255,255,0.15); }
+
+    /* ── Layout ── */
+    .layout { max-width: 1200px; margin: 0 auto; padding: 1.25rem; }
+
+    /* ── KPIs ── */
+    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.25rem; }
+    @media (max-width: 700px) { .kpis { grid-template-columns: repeat(2,1fr); } }
+    .kpi {
+      background: var(--card);
+      border-radius: 14px; padding: 1.1rem 1.2rem;
+      box-shadow: 0 1px 8px rgba(0,0,0,0.06);
+      display: flex; flex-direction: column; gap: 5px;
+    }
+    .kpi-label { font-size: 0.73rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.7px; }
+    .kpi-val { font-size: 1.9rem; font-weight: 700; line-height: 1; }
+    .kpi-sub { font-size: 0.75rem; color: var(--muted); }
+    .kpi-val.green { color: var(--green); }
+    .kpi-val.red   { color: var(--red); }
+    .kpi-val.amber { color: var(--amber); }
+
+    /* ── Panels grid ── */
+    .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+    .panels-bottom { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 850px) { .panels, .panels-bottom { grid-template-columns: 1fr; } }
+
+    .panel {
+      background: var(--card);
+      border-radius: 14px; padding: 1.1rem 1.2rem;
+      box-shadow: 0 1px 8px rgba(0,0,0,0.06);
+    }
+    .panel-title {
+      font-size: 0.78rem; font-weight: 600;
+      color: var(--muted); text-transform: uppercase;
+      letter-spacing: 0.7px; margin-bottom: 1rem;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .panel-body { max-height: 320px; overflow-y: auto; }
+    .panel-body::-webkit-scrollbar { width: 4px; }
+    .panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+    /* ── Station rows ── */
+    .station-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 0; border-bottom: 1px solid var(--border);
+    }
+    .station-row:last-child { border-bottom: none; }
+    .s-name { flex: 1; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .s-bar-wrap { width: 80px; background: var(--border); border-radius: 99px; height: 5px; flex-shrink: 0; }
+    .s-bar-fill { height: 5px; border-radius: 99px; transition: width 0.5s ease; }
+    .s-pct { font-size: 0.75rem; color: var(--muted); width: 30px; text-align: left; flex-shrink: 0; }
+
+    .badge { font-size: 0.65rem; font-weight: 600; padding: 2px 8px; border-radius: 99px; flex-shrink: 0; }
+    .b-green { background: var(--green-light); color: var(--green-dark); }
+    .b-amber { background: var(--amber-light); color: #7A4E0A; }
+    .b-red   { background: var(--red-light);   color: #7A1F1F; }
+    .b-blue  { background: var(--blue-light);  color: #185FA5; }
+
+    /* ── Driver rows ── */
+    .driver-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 0; border-bottom: 1px solid var(--border);
+      font-size: 0.83rem;
+    }
+    .driver-row:last-child { border-bottom: none; }
+    .d-id { width: 30px; font-weight: 600; color: var(--muted); flex-shrink: 0; font-size: 0.78rem; }
+    .d-dest { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .d-dist { font-size: 0.75rem; color: var(--muted); flex-shrink: 0; }
+    .d-unassigned { color: var(--red); font-style: italic; }
+
+    /* ── Algo steps ── */
+    .algo-steps { display: flex; gap: 0; margin-bottom: 1.25rem; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+    .step { flex: 1; padding: 9px 8px; text-align: center; font-size: 0.75rem; color: var(--muted); background: var(--bg); border-left: 1px solid var(--border); transition: background 0.3s; }
+    .step:first-child { border-left: none; }
+    .step-num { font-size: 1.1rem; font-weight: 700; color: var(--text); display: block; margin-bottom: 2px; }
+    .step.done { background: var(--green-light); }
+    .step.done .step-num { color: var(--green-dark); }
+    .step.active { background: #FFF8E7; }
+    .step.active .step-num { color: var(--amber); }
+
+    .stat-row {
+      display: flex; justify-content: space-between;
+      padding: 7px 0; border-bottom: 1px solid var(--border);
+      font-size: 0.85rem;
+    }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-label { color: var(--muted); }
+    .stat-value { font-weight: 600; }
+
+    /* ── Graph panel ── */
+    .graph-panel {
+      background: var(--card); border-radius: 14px;
+      padding: 1.1rem 1.2rem;
+      box-shadow: 0 1px 8px rgba(0,0,0,0.06);
+      margin-bottom: 1rem;
+    }
+    #graph-iframe {
+      width: 100%; height: 480px;
+      border: none; border-radius: 10px;
+      background: #f5f5f0;
+    }
+
+    /* ── Loading overlay ── */
+    #loading {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(26,46,37,0.6);
+      z-index: 500; align-items: center; justify-content: center;
+      flex-direction: column; gap: 1rem;
+    }
+    #loading.show { display: flex; }
+    .loading-box {
+      background: #fff; border-radius: 16px;
+      padding: 2rem 2.5rem; text-align: center;
+    }
+    .loading-spinner {
+      width: 40px; height: 40px;
+      border: 4px solid var(--border);
+      border-top-color: var(--green);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin: 0 auto 1rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text { font-weight: 600; color: var(--text); }
+    .loading-sub { font-size: 0.82rem; color: var(--muted); margin-top: 4px; }
+
+    /* ── Legend ── */
+    .legend { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.75rem; }
+    .legend-item { display: flex; align-items: center; gap: 5px; font-size: 0.75rem; color: var(--muted); }
+    .legend-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+    .empty-state {
+      text-align: center; padding: 2.5rem 1rem; color: var(--muted);
+    }
+    .empty-state-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+
+    /* ── Animate in ── */
+    .fade-in { animation: fadeIn 0.35s ease; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } }
+  </style>
+</head>
+<body>
+
+<!-- ── Topbar ── -->
+<div class="topbar">
+  <div>
+    <div class="logo">⚡ EV Router <span>Jerusalem</span></div>
+    <div class="topbar-sub">דשבורד מנהל מערכת</div>
+  </div>
+  <div class="topbar-spacer"></div>
+  <select class="pref-select" id="pref-select">
+    <option value="any">כל סוגי הטעינה</option>
+    <option value="fast">מהיר בלבד</option>
+    <option value="slow">איטי בלבד</option>
+  </select>
+  <button class="btn-run" id="btn-run" onclick="runAlgorithm()">▶ הרץ אלגוריתם</button>
+  <a class="driver-link" href="/">← ממשק נהג</a>
+</div>
+
+<!-- ── Loading ── -->
+<div id="loading">
+  <div class="loading-box">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">מריץ Push-Relabel...</div>
+    <div class="loading-sub" id="loading-step">אתחול גרף</div>
+  </div>
+</div>
+
+<div class="layout" id="dashboard">
+
+  <!-- KPIs -->
+  <div class="kpis" id="kpis">
+    <div class="kpi">
+      <div class="kpi-label">נהגים פעילים שהוקצו</div>
+      <div class="kpi-val" id="kpi-assigned">—</div>
+      <div class="kpi-sub" id="kpi-assigned-sub">שעה אחרונה</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">תחנות מלאות</div>
+      <div class="kpi-val" id="kpi-full">—</div>
+      <div class="kpi-sub">עומס 100%</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">ממוצע עומס</div>
+      <div class="kpi-val" id="kpi-avgload">—</div>
+      <div class="kpi-sub">כלל התחנות</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">זמן ריצה</div>
+      <div class="kpi-val" id="kpi-time">—</div>
+      <div class="kpi-sub" id="kpi-iters">איטרציות: —</div>
+    </div>
+  </div>
+
+  <!-- Panels: עמדות + נהגים -->
+  <div class="panels">
+
+    <!-- עמדות -->
+    <div class="panel">
+      <div class="panel-title">🔌 עמדות טעינה — עומסים</div>
+      <div class="panel-body" id="stations-panel">
+        <div class="empty-state"><div class="empty-state-icon">📊</div><div>הרץ את האלגוריתם לצפייה בנתונים</div></div>
+      </div>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div>פנוי</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--amber)"></div>עמוס</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>מלא</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--blue)"></div>לא שויך</div>
+      </div>
+    </div>
+
+    <!-- נהגים -->
+    <div class="panel">
+      <div class="panel-title">🚗 הקצאות נהגים</div>
+      <div class="panel-body" id="drivers-panel">
+        <div class="empty-state"><div class="empty-state-icon">🗺</div><div>הרץ את האלגוריתם לצפייה בנתונים</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Panels: ויזואליזציה גרף + סטטוס אלגוריתם -->
+  <div class="panels-bottom">
+
+    <!-- גרף -->
+    <div class="panel">
+      <div class="panel-title">🔗 גרף הזרימה — Push-Relabel</div>
+      <iframe id="graph-iframe" src="/static/graph.html" title="ויזואליזציית גרף הזרימה"></iframe>
+      <div class="legend" style="margin-top:0.6rem">
+        <div class="legend-item">▲ נהג עם מהיר בטווח</div>
+        <div class="legend-item">▽ נהג ללא מהיר</div>
+        <div class="legend-item">● גודל = קיבולת</div>
+      </div>
+    </div>
+
+    <!-- סטטוס אלגוריתם -->
+    <div class="panel">
+      <div class="panel-title">⚙️ סטטוס ריצת האלגוריתם</div>
+
+      <div class="algo-steps" id="algo-steps">
+        <div class="step" id="step-1"><span class="step-num">1</span>Pre-proc</div>
+        <div class="step" id="step-2"><span class="step-num">2</span>בניית גרף</div>
+        <div class="step" id="step-3"><span class="step-num">3</span>Push-Relabel</div>
+        <div class="step" id="step-4"><span class="step-num">4</span>הקצאות</div>
+      </div>
+
+      <div id="stats-panel">
+        <div class="stat-row"><span class="stat-label">נהגים פעילים (שעה אחרונה)</span><span class="stat-value" id="s-drivers">—</span></div>
+        <div class="stat-row"><span class="stat-label">הוקצו בהצלחה</span><span class="stat-value green" id="s-assigned" style="color:var(--green)">—</span></div>
+        <div class="stat-row"><span class="stat-label">לא הוקצו</span><span class="stat-value" id="s-unassigned" style="color:var(--red)">—</span></div>
+        <div class="stat-row"><span class="stat-label">זרימה מקסימלית</span><span class="stat-value" id="s-flow">—</span></div>
+        <div class="stat-row"><span class="stat-label">זמן ריצה</span><span class="stat-value" id="s-time">—</span></div>
+        <div class="stat-row"><span class="stat-label">איטרציות</span><span class="stat-value" id="s-iters">—</span></div>
+        <div class="stat-row"><span class="stat-label">העדפה</span><span class="stat-value" id="s-pref">—</span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+let steps = [false, false, false, false];
+
+function setStep(n) {
+  for (let i = 1; i <= 4; i++) {
+    const el = document.getElementById(`step-${i}`);
+    el.className = "step" + (i < n ? " done" : i === n ? " active" : "");
+  }
+}
+
+async function runAlgorithm() {
+  const pref = document.getElementById("pref-select").value;
+  const btn = document.getElementById("btn-run");
+  btn.disabled = true;
+
+  // הצג loading עם שלבים
+  document.getElementById("loading").classList.add("show");
+  const stepMsgs = ["מריץ pre-processing...", "בונה גרף הזרימה...", "מריץ Push-Relabel...", "מחשב הקצאות..."];
+  let si = 0;
+  setStep(1);
+
+  const stepInterval = setInterval(() => {
+    si = Math.min(si + 1, 3);
+    document.getElementById("loading-step").textContent = stepMsgs[si];
+    setStep(si + 1);
+  }, 400);
+
+  try {
+    const res = await fetch("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ preference: pref })
+    });
+    const data = await res.json();
+
+    clearInterval(stepInterval);
+    setStep(5); // כל השלבים done
+    for (let i = 1; i <= 4; i++) {
+      document.getElementById(`step-${i}`).className = "step done";
+    }
+
+    document.getElementById("loading").classList.remove("show");
+    renderDashboard(data, pref);
+  } catch (e) {
+    clearInterval(stepInterval);
+    document.getElementById("loading").classList.remove("show");
+    alert("שגיאה בהרצת האלגוריתם");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderDashboard(data, pref) {
+  const stats = data.stats;
+  const prefLabel = { any: "כלשהי", fast: "מהירה בלבד", slow: "איטית בלבד" }[pref];
+  const sp = document.getElementById("stations-panel");
+  const dp = document.getElementById("drivers-panel");
+
+  // מצב ריק — אין נהגים פעילים
+  if (data.no_active_drivers) {
+    document.getElementById("kpi-assigned").textContent = "0";
+    document.getElementById("kpi-assigned").className = "kpi-val";
+    document.getElementById("kpi-assigned-sub").textContent = "אין נהגים פעילים";
+    document.getElementById("kpi-full").textContent = "—";
+    document.getElementById("kpi-full").className = "kpi-val";
+    document.getElementById("kpi-avgload").textContent = "—";
+    document.getElementById("kpi-avgload").className = "kpi-val";
+    document.getElementById("kpi-time").textContent = "—";
+    document.getElementById("kpi-iters").textContent = "";
+
+    sp.innerHTML = `<div class="empty-state"><div class="empty-state-icon">⏳</div>
+      <div>אין נהגים פעילים בשעה האחרונה</div>
+      <div style="font-size:0.75rem;margin-top:6px;color:var(--muted)">הנתונים יתעדכנו אוטומטית עם כניסת נהגים</div></div>`;
+    dp.innerHTML = sp.innerHTML;
+    document.getElementById("s-drivers").textContent = "0";
+    document.getElementById("s-assigned").textContent = "0";
+    document.getElementById("s-unassigned").textContent = "0";
+    document.getElementById("s-flow").textContent = "0";
+    document.getElementById("s-time").textContent = "—";
+    document.getElementById("s-iters").textContent = "—";
+    document.getElementById("s-pref").textContent = prefLabel;
+    return;
+  }
+
+  // KPIs
+  document.getElementById("kpi-assigned").textContent = `${stats.n_assigned}/${stats.n_drivers}`;
+  document.getElementById("kpi-assigned").className = "kpi-val " + (stats.n_assigned === stats.n_drivers ? "green" : "amber");
+  document.getElementById("kpi-assigned-sub").textContent = `${stats.n_drivers} נהגים פעילים`;
+  document.getElementById("kpi-full").textContent = stats.n_full;
+  document.getElementById("kpi-full").className = "kpi-val " + (stats.n_full > 0 ? "red" : "green");
+  document.getElementById("kpi-avgload").textContent = stats.avg_load + "%";
+  document.getElementById("kpi-avgload").className = "kpi-val " + (stats.avg_load >= 70 ? "red" : stats.avg_load >= 40 ? "amber" : "green");
+  document.getElementById("kpi-time").textContent = stats.elapsed + "s";
+  document.getElementById("kpi-iters").textContent = `איטרציות: ${stats.iterations}`;
+
+  // Stats
+  document.getElementById("s-drivers").textContent = stats.n_drivers;
+  document.getElementById("s-assigned").textContent = stats.n_assigned;
+  document.getElementById("s-unassigned").textContent = stats.n_unassigned;
+  document.getElementById("s-flow").textContent = stats.total_flow || stats.n_assigned;
+  document.getElementById("s-time").textContent = stats.elapsed + " שנ'";
+  document.getElementById("s-iters").textContent = stats.iterations;
+  document.getElementById("s-pref").textContent = prefLabel;
+
+  // עמדות — מציג עומס מדווח בלבד
+  sp.innerHTML = "";
+  const sorted = [...data.station_loads].sort((a, b) => b.fill_pct - a.fill_pct);
+  sorted.forEach(s => {
+    const color = s.fill_pct >= 100 ? "var(--red)" : s.fill_pct >= 50 ? "var(--amber)" : s.fill_pct > 0 ? "var(--green)" : "var(--blue)";
+    const badgeCls = !s.has_report ? "b-blue" : s.fill_pct >= 100 ? "b-red" : s.fill_pct >= 50 ? "b-amber" : s.fill_pct > 0 ? "b-green" : "b-blue";
+    const badgeText = !s.has_report ? "לא ידוע" : s.fill_pct >= 100 ? "מלא" : s.fill_pct >= 50 ? "עמוס" : s.fill_pct > 0 ? "חלקי" : "פנוי";
+    const pct = s.has_report ? s.fill_pct + "%" : "?";
+    sp.innerHTML += `
+      <div class="station-row">
+        <div class="s-name" title="${s.name}">${s.name}</div>
+        <div class="s-bar-wrap"><div class="s-bar-fill" style="width:${s.fill_pct}%;background:${color}"></div></div>
+        <div class="s-pct">${pct}</div>
+        <span class="badge ${badgeCls}">${badgeText}</span>
+      </div>`;
+  });
+
+  // נהגים — עם שעת פעילות אחרונה
+  dp.innerHTML = "";
+  data.drivers.forEach(d => {
+    const asgn = d.assignment;
+    const typeTag = asgn
+      ? (asgn.fast ? `<span class="badge b-blue">⚡</span>` : `<span class="badge" style="background:#F5F5F5;color:#666">🐢</span>`)
+      : `<span class="badge b-red">✗</span>`;
+    const dest = asgn
+      ? `<span class="d-dest">${asgn.station_name}</span>`
+      : `<span class="d-dest d-unassigned">לא הוקצה</span>`;
+    const dist = asgn ? `<span class="d-dist">${asgn.dist} ק"מ</span>` : "";
+    const tsTag = d.ts_str ? `<span style="font-size:0.7rem;color:var(--muted);flex-shrink:0">${d.ts_str}</span>` : "";
+    dp.innerHTML += `
+      <div class="driver-row">
+        <div class="d-id">${d.id}</div>
+        ${dest}
+        ${typeTag}
+        ${dist}
+        ${tsTag}
+      </div>`;
+  });
+
+  document.getElementById("dashboard").classList.add("fade-in");
+}
+
+// הרץ אוטומטית בטעינה + רענון כל דקה
+window.addEventListener("load", () => {
+  setTimeout(runAlgorithm, 300);
+  setInterval(runAlgorithm, 60000);
+});
+</script>
+</body>
+</html>
