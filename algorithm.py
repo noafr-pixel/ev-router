@@ -3,59 +3,52 @@
 algorithm.py
 ------------
 מכיל:
-  - נתוני התחנות (STATIONS) מוגדרים ישירות (ללא Excel)
+  - נתוני התחנות (STATIONS) — נטענים מהקובץ stations_israel.json (כל הארץ)
   - פונקציית haversine לחישוב מרחקים
-  - פונקציית build_graph לבניית גרף הזרימה
-  - מימוש Push-Relabel
+  - פונקציית build_graph לבניית גרף הזרימה (עם עלויות = מרחק)
+  - מימוש Min-Cost Max-Flow באמצעות Cost-Scaling Push-Relabel (Goldberg-Tarjan)
   - פונקציית run_algorithm שמחזירה תוצאות מסודרות
 
-הסבר קצר על Flask + Python:
-  כל פונקציה בקובץ זה היא "כלי" שה-app.py (השרת) משתמש בו.
-  app.py מייבא מכאן ומפעיל run_algorithm() כשהמשתמש לוחץ "חפש".
+מקור הנתונים:
+  מאגר עמדות הטעינה של משרד האנרגיה (Cello Charge), נשלף ב-21.11.2026.
+  כל רשומה = אתר טעינה:
+    cap  = מספר השקעים באתר (כמה רכבים יכולים להיטען בו-זמנית)
+    fast = שקעי DC (טעינה מהירה)
+    slow = שקעי AC (טעינה איטית)
+
+המודל:
+  SOURCE → נהג   : קיבולת 1, עלות 0
+  נהג → תחנה     : קיבולת 1, עלות = מרחק במטרים (רק תחנות ברדיוס)
+  תחנה → SINK    : קיבולת = שקעים פנויים (cap פחות דיווחי עומס), עלות 0
+
+  מטרה (לפי סדר עדיפות):
+    1. הנהג שמחפש עכשיו (priority_driver) מקבל את התחנה הקרובה ביותר
+       שיש בה שקע פנוי. אם הקרובה מלאה — את הבאה אחריה, וכן הלאה.
+    2. לשאר הנהגים: למקסם את מספר הנהגים ששובצו (Maximum Flow)
+    3. מבין כל השיבוצים המקסימליים — למזער את סכום המרחקים (Minimum Cost)
 """
 
+import json
 import math
-from collections import defaultdict
+import os
+from collections import defaultdict, deque
 
 # ──────────────────────────────────────────
-# נתוני התחנות — מבוססים על ה-Excel שלכם
+# נתוני התחנות — כל הארץ
 # ──────────────────────────────────────────
-STATIONS = [
-    {"id": "S638",  "name": "יקותיאל אדם 2 ירושלים",          "operator": "AdviceCPW",    "lat": 31.7703, "lon": 35.2145, "cap": 4,  "fast": 0,  "slow": 4},
-    {"id": "S462",  "name": "דרך שלווה ירושלים",               "operator": "LishatechCPW", "lat": 31.7621, "lon": 35.2089, "cap": 10, "fast": 6,  "slow": 4},
-    {"id": "S1981", "name": "שדרות ירושלים 1",                  "operator": "Greenspot",    "lat": 31.8040, "lon": 35.2165, "cap": 2,  "fast": 0,  "slow": 2},
-    {"id": "S565",  "name": "קניון רב שפע שמגר ירושלים",        "operator": "AdviceCPW",    "lat": 31.7954, "lon": 35.2145, "cap": 4,  "fast": 4,  "slow": 0},
-    {"id": "S429",  "name": "HolyLand",                         "operator": "EdgeControl",  "lat": 31.7740, "lon": 35.2140, "cap": 1,  "fast": 1,  "slow": 0},
-    {"id": "S454",  "name": "מלונות דן-דן בוטיק ירושלים",       "operator": "AfconEv",      "lat": 31.7499, "lon": 35.2133, "cap": 2,  "fast": 0,  "slow": 2},
-    {"id": "S460",  "name": "חניון תיאטרון ירושלים",            "operator": "AfconEv",      "lat": 31.7725, "lon": 35.2133, "cap": 4,  "fast": 0,  "slow": 4},
-    {"id": "S464",  "name": "עסקי - תיאטרון ירושלים",           "operator": "Ev4u",         "lat": 31.7725, "lon": 35.2133, "cap": 3,  "fast": 0,  "slow": 3},
-    {"id": "S469",  "name": "מלון ענבל ירושלים",                "operator": "Enova",        "lat": 31.7797, "lon": 35.2249, "cap": 2,  "fast": 0,  "slow": 2},
-    {"id": "S472",  "name": "Gav Yam Jerusalem",                "operator": "InterEv",      "lat": 31.7663, "lon": 35.2057, "cap": 14, "fast": 0,  "slow": 14},
-    {"id": "S477",  "name": "מלונות דן - פנורמה ירושלים",       "operator": "AfconEv",      "lat": 31.7746, "lon": 35.2178, "cap": 2,  "fast": 0,  "slow": 2},
-    {"id": "S481",  "name": "מלונות דן - מלון קינג דיויד",      "operator": "AfconEv",      "lat": 31.7769, "lon": 35.2216, "cap": 2,  "fast": 0,  "slow": 2},
-    {"id": "S487",  "name": "ירושלים מלון שלוש הקשתות",         "operator": "Enova",        "lat": 31.7769, "lon": 35.2216, "cap": 2,  "fast": 0,  "slow": 2},
-    {"id": "S502",  "name": "לאונרדו פלאזה ירושלים - פתאל",     "operator": "ViMore",       "lat": 31.7677, "lon": 35.2134, "cap": 2,  "fast": 0,  "slow": 2},
-    {"id": "S513",  "name": "מגדלי ירושלים",                    "operator": "AfconEv",      "lat": 31.7703, "lon": 35.2152, "cap": 2,  "fast": 0,  "slow": 2},
-    {"id": "S523",  "name": "חניון הלאום ירושלים",              "operator": "Enova",        "lat": 31.7752, "lon": 35.2120, "cap": 7,  "fast": 3,  "slow": 4},
-    {"id": "S526",  "name": "לאונרדו בוטיק ירושלים - פתאל",    "operator": "ViMore",       "lat": 31.7809, "lon": 35.2234, "cap": 2,  "fast": 0,  "slow": 2},
-    {"id": "S533",  "name": "חניון אגריפס 88 ירושלים",          "operator": "ZenEvCEP",     "lat": 31.7852, "lon": 35.2181, "cap": 24, "fast": 4,  "slow": 20},
-    {"id": "S540",  "name": "מגדל הנביאים ירושלים",             "operator": "AfconEv",      "lat": 31.7887, "lon": 35.2070, "cap": 2,  "fast": 0,  "slow": 2},
-    {"id": "S541",  "name": "מלון קיסר ירושלים",                "operator": "Enova",        "lat": 31.7887, "lon": 35.2070, "cap": 2,  "fast": 0,  "slow": 2},
-    {"id": "S542",  "name": "לאונרדו ירושלים - פתאל",           "operator": "ViMore",       "lat": 31.7850, "lon": 35.2284, "cap": 2,  "fast": 0,  "slow": 2},
-    {"id": "S544",  "name": "מלון ירושלים",                     "operator": "Lishatech",    "lat": 31.7850, "lon": 35.2284, "cap": 4,  "fast": 0,  "slow": 4},
-    {"id": "S610",  "name": "ציבורי - קדמא נווה אילן ירושלים",  "operator": "Ev4u",         "lat": 31.8030, "lon": 35.1640, "cap": 2,  "fast": 0,  "slow": 2},
-    {"id": "S613",  "name": "ציבורי - סי הוטל נווה אילן",       "operator": "Ev4u",         "lat": 31.8030, "lon": 35.1640, "cap": 6,  "fast": 0,  "slow": 6},
-    {"id": "S408",  "name": "בית הלוחם ירושלים",                "operator": "Enova",        "lat": 31.7746, "lon": 35.2162, "cap": 4,  "fast": 0,  "slow": 4},
-    {"id": "S416",  "name": "קניון עזריאלי ירושלים",            "operator": "SonolEvi",     "lat": 31.7445, "lon": 35.2009, "cap": 9,  "fast": 0,  "slow": 9},
-    {"id": "S421",  "name": "אולם תצוגה לובינסקי ירושלים",      "operator": "Gnrgy",        "lat": 31.7690, "lon": 35.2136, "cap": 2,  "fast": 2,  "slow": 0},
-]
+_DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stations_israel.json")
+with open(_DATA_PATH, "r", encoding="utf-8") as _f:
+    STATIONS = json.load(_f)
+
+STATIONS_BY_ID = {s["id"]: s for s in STATIONS}
+
 
 # ──────────────────────────────────────────
 # מרחק Haversine
 # ──────────────────────────────────────────
 def haversine(lat1, lon1, lat2, lon2):
     """
-    מחשב מרחק בק"מ בין שתי נקודות גאוגרפיות.
+    מחשב מרחק בק"מ בין שתי נקודות גאוגרפיות (מרחק אווירי).
     מתחשב בעקמומיות כדור הארץ.
     """
     R = 6371
@@ -68,161 +61,248 @@ def haversine(lat1, lon1, lat2, lon2):
     return R * 2 * math.asin(math.sqrt(a))
 
 
+def stations_near(lat, lon, max_dist, preference="any"):
+    """
+    מחזיר [(תחנה, מרחק)] ברדיוס max_dist ק"מ, ממוינות מהקרובה לרחוקה.
+    קודם סינון מהיר לפי "ריבוע" של קווי רוחב/אורך, ורק אז haversine —
+    כדי לא לחשב מרחק לכל 3,000+ התחנות בארץ.
+    """
+    dlat = max_dist / 111.0
+    dlon = max_dist / (111.0 * math.cos(math.radians(lat)))
+    out = []
+    for s in STATIONS:
+        if abs(s["lat"] - lat) > dlat or abs(s["lon"] - lon) > dlon:
+            continue
+        if preference == "fast" and s["fast"] == 0:
+            continue
+        if preference == "slow" and s["slow"] == 0:
+            continue
+        dist = haversine(lat, lon, s["lat"], s["lon"])
+        if dist <= max_dist:
+            out.append((s, dist))
+    out.sort(key=lambda x: x[1])
+    return out
+
+
+def free_slots(station, occupancy_data):
+    """שקעים פנויים בתחנה = קיבולת פחות רכבים שדווחו בה."""
+    reported = (occupancy_data or {}).get(station["id"], 0)
+    return max(0, station["cap"] - reported)
+
+
+# ──────────────────────────────────────────
+# רשת זרימה עם עלויות
+# ──────────────────────────────────────────
+class FlowNetwork:
+    """
+    גרף מכוון עם קיבולת ועלות לכל קשת.
+    כל קשת נשמרת יחד עם הקשת ההפוכה שלה (residual) — אינדקס e ו-e^1.
+    """
+
+    def __init__(self):
+        self.index = {}       # שם צומת → מספר
+        self.names = []       # מספר → שם צומת
+        self.adj = []         # לכל צומת: רשימת אינדקסים של קשתות יוצאות
+        self.to = []
+        self.cap = []
+        self.cost = []
+        self.flow = []
+
+    def node(self, name):
+        if name not in self.index:
+            self.index[name] = len(self.names)
+            self.names.append(name)
+            self.adj.append([])
+        return self.index[name]
+
+    def add_edge(self, u, v, cap, cost):
+        u, v = self.node(u), self.node(v)
+        for a, b, c, w in ((u, v, cap, cost), (v, u, 0, -cost)):
+            self.adj[a].append(len(self.to))
+            self.to.append(b)
+            self.cap.append(c)
+            self.cost.append(w)
+            self.flow.append(0)
+
+    def residual(self, e):
+        return self.cap[e] - self.flow[e]
+
+    def flow_between(self, u, v):
+        if u not in self.index or v not in self.index:
+            return 0
+        iu, iv = self.index[u], self.index[v]
+        return sum(self.flow[e] for e in self.adj[iu] if self.to[e] == iv and self.cap[e] > 0)
+
+
+# ──────────────────────────────────────────
+# Min-Cost Max-Flow: Cost-Scaling Push-Relabel
+# ──────────────────────────────────────────
+def min_cost_max_flow(net, source, sink, max_flow_bound):
+    """
+    אלגוריתם Cost-Scaling Push-Relabel (Goldberg & Tarjan, 1990).
+
+    רעיון:
+      - מוסיפים קשת SINK → SOURCE עם עלות שלילית גדולה מאוד (−BIG).
+        כך כל יחידת זרימה נוספת "משתלמת" יותר מכל מרחק,
+        ולכן הפתרון הזול ביותר הוא גם בעל הזרימה המקסימלית.
+      - כל צומת מקבל "מחיר" p (במקום ה"גובה" של Push-Relabel הרגיל).
+        עלות מופחתת של קשת: c_p(u,v) = cost(u,v) + p(u) − p(v).
+      - קשת "קבילה" (admissible) = יש בה קיבולת שארית ו-c_p < 0.
+      - Push: דוחפים עודף (excess) לאורך קשת קבילה.
+      - Relabel: אם אין קשת קבילה — מורידים את המחיר של הצומת
+        כך שתיווצר קשת עם c_p = −ε.
+      - ε מתחיל גדול ומוקטן פי α בכל שלב (scaling).
+        כשהעלויות מוכפלות ב-n ו-ε מגיע ל-1, הפתרון אופטימלי.
+
+    מחזיר: (כמות זרימה, עלות כוללת, מספר פעולות)
+    """
+    s, t = net.index[source], net.index[sink]
+    n = len(net.names)
+
+    # BIG גדול מכל עלות אפשרית של מסלול שיפור → זרימה מקסימלית קודמת למרחק
+    max_edge_cost = max([c for c in net.cost if c > 0], default=1)
+    BIG = max_edge_cost * n + 1
+    net.add_edge(sink, source, max_flow_bound, -BIG)
+    ret_edge = len(net.to) - 2
+
+    m = len(net.to)
+    scaled = [c * n for c in net.cost]                 # עלויות מוכפלות ב-n
+    price = [0] * n
+    excess = [0] * n
+    alpha = 8
+    eps = max(abs(c) for c in scaled) or 1
+    ops = 0
+
+    def reduced(e, u):
+        return scaled[e] + price[u] - price[net.to[e]]
+
+    while True:
+        eps = max(1, eps // alpha)
+
+        # ── refine(ε) ──
+        # 1. רוויה של כל קשת עם עלות מופחתת שלילית
+        for u in range(n):
+            for e in net.adj[u]:
+                r = net.residual(e)
+                if r > 0 and reduced(e, u) < 0:
+                    v = net.to[e]
+                    net.flow[e] += r
+                    net.flow[e ^ 1] -= r
+                    excess[u] -= r
+                    excess[v] += r
+
+        # 2. Push / Relabel עד שאין צמתים פעילים
+        active = deque(u for u in range(n) if excess[u] > 0)
+        in_q = [excess[u] > 0 for u in range(n)]
+        cur = [0] * n
+        while active:
+            u = active.popleft()
+            in_q[u] = False
+            while excess[u] > 0:
+                if cur[u] == len(net.adj[u]):
+                    # Relabel: מחיר חדש כך שתיווצר קשת קבילה עם c_p = −ε
+                    best = None
+                    for e in net.adj[u]:
+                        if net.residual(e) > 0:
+                            val = price[net.to[e]] - scaled[e]
+                            if best is None or val > best:
+                                best = val
+                    price[u] = best - eps
+                    cur[u] = 0
+                    ops += 1
+                    continue
+                e = net.adj[u][cur[u]]
+                r = net.residual(e)
+                if r > 0 and reduced(e, u) < 0:
+                    # Push
+                    v = net.to[e]
+                    d = min(excess[u], r)
+                    net.flow[e] += d
+                    net.flow[e ^ 1] -= d
+                    excess[u] -= d
+                    excess[v] += d
+                    ops += 1
+                    if excess[v] > 0 and not in_q[v]:
+                        active.append(v)
+                        in_q[v] = True
+                else:
+                    cur[u] += 1
+
+        if eps == 1:
+            break
+
+    total_flow = net.flow[ret_edge]
+    total_cost = sum(net.flow[e] * net.cost[e] for e in range(0, m, 2) if e != ret_edge)
+    return total_flow, total_cost, ops
+
+
 # ──────────────────────────────────────────
 # בניית גרף הזרימה
 # ──────────────────────────────────────────
-def build_graph(drivers, preference="any", max_dist=5.0, occupancy_data=None):
+def build_graph(drivers, preference="any", max_dist=5.0, occupancy_data=None, reserved=None):
     """
-    בונה את מבנה הנתונים של הגרף:
+    בונה את רשת הזרימה:
       SOURCE → נהגים → תחנות → SINK
+    עלות קשת נהג→תחנה = מרחק במטרים.
 
-    preference: "any" / "fast" / "slow"
-    max_dist: רדיוס חיפוש בק"מ
-    occupancy_data: {station_id: count} — רכבים מדווחים כרגע בתחנה
+    רק תחנות שבטווח של לפחות נהג אחד נכנסות לגרף,
+    כך שהגרף נשאר קטן גם כשהמאגר כולל את כל הארץ.
+
+    reserved: {station_id: count} — שקעים שכבר הוקצו (לנהג בעדיפות),
+              ולכן לא זמינים לשאר הנהגים.
     """
-    SOURCE = "SOURCE"
-    SINK = "SINK"
+    SOURCE, SINK = "SOURCE", "SINK"
+    net = FlowNetwork()
+    net.node(SOURCE)
+    net.node(SINK)
 
-    capacity = defaultdict(lambda: defaultdict(int))
-    graph = defaultdict(set)
-
-    def add_edge(u, v, cap):
-        capacity[u][v] += cap
-        graph[u].add(v)
-        graph[v].add(u)
-
-    # SOURCE → כל נהג: קיבולת 1 (נהג אחד = רכב אחד)
-    for d in drivers:
-        add_edge(SOURCE, d["id"], 1)
-
-    # נהג → תחנות בטווח (עם pre-processing לפי העדפה)
-    driver_has_fast = {}
-    driver_reachable = {}  # תחנות שכל נהג יכול להגיע אליהן
+    driver_reachable = {}
+    used = {}
 
     for d in drivers:
-        has_fast = False
-        reachable = []
-        for s in STATIONS:
-            # סינון לפי העדפה (pre-processing)
-            if preference == "fast" and s["fast"] == 0:
-                continue
-            if preference == "slow" and s["slow"] == 0:
-                continue
+        net.add_edge(SOURCE, d["id"], 1, 0)
+        reach = []
+        for s, dist in stations_near(d["lat"], d["lon"], max_dist, preference):
+            net.add_edge(d["id"], s["id"], 1, int(round(dist * 1000)))
+            used[s["id"]] = s
+            reach.append({"station_id": s["id"], "dist": round(dist, 2)})
+        driver_reachable[d["id"]] = reach
 
-            dist = haversine(d["lat"], d["lon"], s["lat"], s["lon"])
-            if dist <= max_dist:
-                add_edge(d["id"], s["id"], 1)
-                reachable.append({"station_id": s["id"], "dist": round(dist, 2)})
-                if s["fast"] > 0:
-                    has_fast = True
+    for sid, s in used.items():
+        avail = free_slots(s, occupancy_data) - (reserved or {}).get(sid, 0)
+        if avail > 0:
+            net.add_edge(sid, SINK, avail, 0)
 
-        driver_has_fast[d["id"]] = has_fast
-        driver_reachable[d["id"]] = reachable
-
-    # תחנה → SINK: קיבולת = עמדות פנויות (בניכוי דיווחי עומס)
-    for s in STATIONS:
-        reported = (occupancy_data or {}).get(s["id"], 0)
-        available = max(0, s["cap"] - reported)
-        if available > 0:
-            add_edge(s["id"], SINK, available)
-
-    return graph, capacity, driver_has_fast, driver_reachable, SOURCE, SINK
+    return net, driver_reachable, list(used.values()), SOURCE, SINK
 
 
 # ──────────────────────────────────────────
-# אלגוריתם Push-Relabel
+# שלב 1 — עדיפות לנהג המחפש: התחנה הקרובה הפנויה
 # ──────────────────────────────────────────
-def push_relabel(graph, capacity, source, sink, stations_list, drivers, driver_has_fast):
+def nearest_available(driver, preference, max_dist, occupancy_data):
     """
-    מימוש Push-Relabel עם עדיפות לתחנות מהירות.
-
-    רעיון:
-    - כל צומת מקבל "גובה" (תווית)
-    - זרימה נדחפת רק ממקום גבוה לנמוך ממנו ב-1
-    - תחנות מהירות מקבלות גובה 1, איטיות 0
-    - נהג עם מהיר בטווח מקבל גובה 2 → ידחף למהיר קודם
+    עובר על התחנות מהקרובה לרחוקה ומחזיר את הראשונה שיש בה שקע פנוי.
+    מחזיר גם כמה תחנות קרובות יותר דולגו כי היו מלאות.
     """
-    nodes = set(graph.keys())
-    nodes.update([source, sink])
-
-    height = defaultdict(int)
-    excess = defaultdict(int)
-    flow = defaultdict(lambda: defaultdict(int))
-
-    height[source] = len(nodes)
-
-    # גבהים לתחנות לפי סוג
-    station_ids = {s["id"] for s in stations_list}
-    for sid in station_ids:
-        s = next((x for x in stations_list if x["id"] == sid), None)
-        height[sid] = 1 if s and s["fast"] > 0 else 0
-
-    # דחיפה ראשונית SOURCE → נהגים
-    for v in list(graph[source]):
-        cap = capacity[source][v]
-        if cap > 0:
-            flow[source][v] = cap
-            flow[v][source] -= cap
-            excess[v] += cap
-            excess[source] -= cap
-
-    # גבהים לנהגים
-    for d in drivers:
-        height[d["id"]] = 2 if driver_has_fast.get(d["id"], False) else 1
-
-    def push(u, v):
-        delta = min(excess[u], capacity[u][v] - flow[u][v])
-        if delta > 0 and height[u] == height[v] + 1:
-            flow[u][v] += delta
-            flow[v][u] -= delta
-            excess[u] -= delta
-            excess[v] += delta
-            return True
-        return False
-
-    def relabel(u):
-        min_h = float('inf')
-        for v in graph[u]:
-            if capacity[u][v] - flow[u][v] > 0:
-                min_h = min(min_h, height[v])
-        if min_h < float('inf'):
-            height[u] = min_h + 1
-
-    active = [v for v in nodes if v != source and v != sink and excess[v] > 0]
-
-    iters = 0
-    while active:
-        u = active[0]
-        pushed = False
-        for v in list(graph[u]):
-            if excess[u] <= 0:
-                break
-            if push(u, v):
-                pushed = True
-                if v != source and v != sink and excess[v] > 0 and v not in active:
-                    active.append(v)
-        if not pushed:
-            relabel(u)
-        if excess[u] <= 0:
-            active.pop(0)
-        iters += 1
-        if iters > 100_000:
-            break
-
-    total_flow = sum(flow[source][v] for v in graph[source])
-    return total_flow, flow, iters
+    skipped_full = 0
+    for s, dist in stations_near(driver["lat"], driver["lon"], max_dist, preference):
+        if free_slots(s, occupancy_data) > 0:
+            return s, dist, skipped_full
+        skipped_full += 1
+    return None, None, skipped_full
 
 
 # ──────────────────────────────────────────
 # פונקציה ראשית — זו שה-app.py קורא לה
 # ──────────────────────────────────────────
-def run_algorithm(drivers, preference="any", max_dist=5.0, occupancy_data=None):
+def run_algorithm(drivers, preference="any", max_dist=5.0, occupancy_data=None, priority_driver=None):
     """
     מקבל:
-      drivers        - רשימת נהגים [{"id":"D1","lat":...,"lon":...}, ...]
-      preference     - "any" / "fast" / "slow"
-      max_dist       - רדיוס בק"מ
-      occupancy_data - {station_id: count} דיווחי עומס אמיתיים
+      drivers         - רשימת נהגים [{"id":"D1","lat":...,"lon":...}, ...]
+      preference      - "any" / "fast" / "slow"
+      max_dist        - רדיוס בק"מ
+      occupancy_data  - {station_id: count} דיווחי עומס אמיתיים
+      priority_driver - id של הנהג שמחפש עכשיו (לדוגמה "USER"), או None
 
     מחזיר dict עם כל התוצאות לממשק:
       total_flow, assignments, station_loads, unassigned, stats
@@ -230,34 +310,65 @@ def run_algorithm(drivers, preference="any", max_dist=5.0, occupancy_data=None):
     import time
     t0 = time.time()
 
-    graph, capacity, driver_has_fast, driver_reachable, SOURCE, SINK = build_graph(
-        drivers, preference, max_dist, occupancy_data
-    )
-
-    total_flow, flow, iters = push_relabel(
-        graph, capacity, SOURCE, SINK, STATIONS, drivers, driver_has_fast
-    )
-
-    elapsed = round(time.time() - t0, 4)
-
-    # חישוב הקצאות
     assignments = {}
-    for d in drivers:
-        for s in STATIONS:
-            if flow[d["id"]][s["id"]] > 0:
-                dist = haversine(d["lat"], d["lon"], s["lat"], s["lon"])
+    reserved = {}
+
+    # ── שלב 1: הנהג המחפש מקבל את הקרובה הפנויה ──
+    others = drivers
+    if priority_driver is not None:
+        pd = next((d for d in drivers if d["id"] == priority_driver), None)
+        if pd is not None:
+            others = [d for d in drivers if d["id"] != priority_driver]
+            s, dist, skipped = nearest_available(pd, preference, max_dist, occupancy_data)
+            if s is not None:
+                reserved[s["id"]] = 1
+                assignments[pd["id"]] = {
+                    "station_id": s["id"],
+                    "station_name": s["name"],
+                    "city": s.get("city", ""),
+                    "dist": round(dist, 2),
+                    "fast": s["fast"] > 0,
+                    "operator": s["operator"],
+                    "skipped_full": skipped,
+                }
+
+    # ── שלב 2: Min-Cost Max-Flow לשאר הנהגים ──
+    net, driver_reachable, used, SOURCE, SINK = build_graph(
+        others, preference, max_dist, occupancy_data, reserved
+    )
+    total_flow, total_cost, ops = min_cost_max_flow(net, SOURCE, SINK, max(len(others), 1))
+
+    for d in others:
+        for r in driver_reachable.get(d["id"], []):
+            if net.flow_between(d["id"], r["station_id"]) > 0:
+                s = STATIONS_BY_ID[r["station_id"]]
                 assignments[d["id"]] = {
                     "station_id": s["id"],
                     "station_name": s["name"],
-                    "dist": round(dist, 2),
+                    "city": s.get("city", ""),
+                    "dist": r["dist"],
                     "fast": s["fast"] > 0,
                     "operator": s["operator"],
                 }
                 break
 
+    # תחנות להצגה: כל מה שבגרף + התחנות סביב הנהג בעדיפות
+    shown = {s["id"]: s for s in used}
+    if priority_driver is not None:
+        pd = next((d for d in drivers if d["id"] == priority_driver), None)
+        if pd is not None:
+            for s, _ in stations_near(pd["lat"], pd["lon"], max_dist, preference):
+                shown[s["id"]] = s
+            driver_reachable[pd["id"]] = [
+                {"station_id": s["id"], "dist": round(dist, 2)}
+                for s, dist in stations_near(pd["lat"], pd["lon"], max_dist, preference)
+            ]
+
+    elapsed = round(time.time() - t0, 4)
+
     # עומס לכל תחנה — לפי דיווחי משתמשים בלבד (ללא סימולציה)
     station_loads = {}
-    for s in STATIONS:
+    for s in shown.values():
         reported = (occupancy_data or {}).get(s["id"], None)
         has_report = reported is not None
         fill_pct = min(round(reported / max(s["cap"], 1) * 100), 100) if has_report else 0
@@ -271,31 +382,35 @@ def run_algorithm(drivers, preference="any", max_dist=5.0, occupancy_data=None):
 
     unassigned = [d["id"] for d in drivers if d["id"] not in assignments]
 
-    # נהגים מועשרים
     drivers_out = []
     for d in drivers:
-        asgn = assignments.get(d["id"])
+        reach = driver_reachable.get(d["id"], [])
         drivers_out.append({
             **d,
-            "has_fast": driver_has_fast.get(d["id"], False),
-            "reachable_count": len(driver_reachable.get(d["id"], [])),
-            "assignment": asgn,
+            "has_fast": any(STATIONS_BY_ID[r["station_id"]]["fast"] > 0 for r in reach),
+            "reachable_count": len(reach),
+            "assignment": assignments.get(d["id"]),
         })
 
+    n_loads = max(len(station_loads), 1)
+    total_km = round(sum(a["dist"] for a in assignments.values()), 2)
     return {
-        "total_flow": total_flow,
+        "total_flow": len(assignments),
         "drivers": drivers_out,
         "station_loads": list(station_loads.values()),
         "assignments": assignments,
         "unassigned": unassigned,
         "stats": {
             "n_drivers": len(drivers),
-            "n_assigned": total_flow,
+            "n_assigned": len(assignments),
             "n_unassigned": len(unassigned),
             "n_stations": len(STATIONS),
+            "n_stations_in_range": len(station_loads),
             "n_full": sum(1 for s in station_loads.values() if s["fill_pct"] >= 100),
-            "avg_load": round(sum(s["fill_pct"] for s in station_loads.values()) / len(STATIONS), 1),
+            "avg_load": round(sum(s["fill_pct"] for s in station_loads.values()) / n_loads, 1),
+            "total_km": total_km,
+            "avg_km": round(total_km / max(len(assignments), 1), 2),
             "elapsed": elapsed,
-            "iterations": iters,
+            "iterations": ops,
         }
     }

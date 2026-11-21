@@ -14,6 +14,8 @@ Flask הוא ספריית Python קטנה לבניית אתרים.
   pip install flask
   python app.py
   ← פותח דפדפן על http://localhost:5000
+
+הנתונים: כל עמדות הטעינה בארץ (stations_israel.json, מתוך מאגר משרד האנרגיה).
 """
 
 import os
@@ -28,7 +30,6 @@ from flask import Flask, render_template, request, jsonify
 from algorithm import run_algorithm, STATIONS, haversine
 
 app = Flask(__name__)
-random.seed(42)
 
 # ── קובץ שמירה (שורד הפעלה מחדש של השרת) ──
 DATA_FILE = os.path.join(os.path.dirname(__file__), "ev_data.json")
@@ -73,14 +74,21 @@ def get_active_drivers():
     ]
 
 # ──────────────────────────────────────────
-# יצירת 30 נהגים אקראיים (seed קבוע = תמיד אותם נהגים)
+# נהגי demo — 30 נהגים אקראיים סביב מיקום החיפוש
 # ──────────────────────────────────────────
-DEMO_DRIVERS = [
-    {"id": f"D{i+1}",
-     "lat": round(random.uniform(31.74, 31.81), 4),
-     "lon": round(random.uniform(35.16, 35.24), 4)}
-    for i in range(30)
-]
+def demo_drivers_near(lat, lon, n=30, spread=0.03):
+    """
+    יוצר n נהגי רקע בסביבת הנהג (±spread מעלות ≈ ±3 ק"מ),
+    כדי שבכל מקום בארץ יהיו "מתחרים" על העמדות.
+    ה-seed תלוי במיקום (מעוגל), כך שאותו אזור תמיד מקבל אותם נהגים.
+    """
+    rng = random.Random(f"{round(lat, 2)},{round(lon, 2)}")
+    return [
+        {"id": f"D{i+1}",
+         "lat": round(lat + rng.uniform(-spread, spread), 4),
+         "lon": round(lon + rng.uniform(-spread, spread), 4)}
+        for i in range(n)
+    ]
 
 # ──────────────────────────────────────────
 # דף נהג — /
@@ -109,7 +117,7 @@ def admin_page():
 def api_find():
     """
     מקבל JSON מהדפדפן: { lat, lon, preference }
-    מריץ את האלגוריתם עבור נהג בודד + כל שאר הנהגים הדמו
+    מריץ את האלגוריתם עבור נהג בודד + נהגי הדמו שסביבו
     מחזיר JSON עם הקצאה ורשימת עמדות
     """
     data = request.get_json()
@@ -117,7 +125,6 @@ def api_find():
     lon = float(data.get("lon", 35.213))
     preference = data.get("preference", "any")
 
-    # הנהג הנוכחי + נהגי הדמו
     # שמור נהג אמיתי — כל חיפוש = רשומה נפרדת
     _cleanup_drivers()
     _driver_counter[0] += 1
@@ -130,9 +137,12 @@ def api_find():
     }
 
     user_driver = {"id": "USER", "lat": lat, "lon": lon}
-    all_drivers = [user_driver] + DEMO_DRIVERS
+    all_drivers = [user_driver] + demo_drivers_near(lat, lon)
 
-    result = run_algorithm(all_drivers, preference=preference, max_dist=5.0, occupancy_data=OCCUPANCY)
+    # priority_driver="USER": הנהג שמחפש מקבל את התחנה הקרובה הפנויה,
+    # ושאר הנהגים משובצים ב-Min-Cost Max-Flow
+    result = run_algorithm(all_drivers, preference=preference, max_dist=5.0,
+                           occupancy_data=OCCUPANCY, priority_driver="USER")
 
     # מצא את ההקצאה של הנהג הנוכחי
     user_assignment = result["assignments"].get("USER")
@@ -166,7 +176,7 @@ def api_find():
 @app.route("/api/run", methods=["POST"])
 def api_run():
     """
-    מריץ את האלגוריתם על כל 30 נהגי הדמו.
+    מריץ את האלגוריתם על כל הנהגים הפעילים (שעה אחרונה).
     מחזיר תוצאות מלאות לדשבורד המנהל.
     """
     data = request.get_json() or {}
@@ -203,7 +213,7 @@ def api_run():
 
 
 # ──────────────────────────────────────────
-# API: נתוני תחנות (לשימוש עתידי / ERD)
+# API: נתוני תחנות (כל הארץ)
 # ──────────────────────────────────────────
 @app.route("/api/stations")
 def api_stations():
@@ -211,7 +221,7 @@ def api_stations():
 
 
 # ──────────────────────────────────────────
-# API: גיאוקודינג כתובת → קואורדינטות
+# API: גיאוקודינג כתובת → קואורדינטות (כל הארץ)
 # ──────────────────────────────────────────
 @app.route("/api/geocode")
 def api_geocode():
@@ -219,12 +229,8 @@ def api_geocode():
     if not q:
         return jsonify({"error": "no query"}), 400
 
-    # מוסיף ירושלים אם לא צוין
-    if "ירושלים" not in q and "jerusalem" not in q.lower():
-        q += ", ירושלים"
-
     url = "https://nominatim.openstreetmap.org/search?q=" + quote(q) + "&format=json&limit=1&countrycodes=il"
-    req = Request(url, headers={"User-Agent": "EV-Router-Jerusalem/1.0"})
+    req = Request(url, headers={"User-Agent": "EV-Router-Israel/1.0"})
     try:
         with urlopen(req, timeout=5) as resp:
             results = _json.loads(resp.read())
@@ -250,11 +256,8 @@ def api_suggest():
     if len(q) < 2:
         return jsonify([])
 
-    if "ירושלים" not in q and "jerusalem" not in q.lower():
-        q += ", ירושלים"
-
     url = "https://nominatim.openstreetmap.org/search?q=" + quote(q) + "&format=json&limit=5&countrycodes=il&accept-language=he"
-    req = Request(url, headers={"User-Agent": "EV-Router-Jerusalem/1.0"})
+    req = Request(url, headers={"User-Agent": "EV-Router-Israel/1.0"})
     try:
         with urlopen(req, timeout=5) as resp:
             results = _json.loads(resp.read())
@@ -329,7 +332,7 @@ def _get_local_ip():
 if __name__ == "__main__":
     local_ip = _get_local_ip()
     print("=" * 50)
-    print("  EV Router Jerusalem")
+    print(f"  EV Router Israel — {len(STATIONS)} אתרי טעינה")
     print(f"  http://localhost:5000      ← מחשב")
     print(f"  http://{local_ip}:5000  ← פלאפון (אותה רשת WiFi)")
     print("=" * 50)
