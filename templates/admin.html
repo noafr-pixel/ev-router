@@ -210,7 +210,7 @@
 <!-- ── Topbar ── -->
 <div class="topbar">
   <div>
-    <div class="logo">⚡ EV Router <span>Jerusalem</span></div>
+    <div class="logo">⚡ EV Router <span>Israel</span></div>
     <div class="topbar-sub">דשבורד מנהל מערכת</div>
   </div>
   <div class="topbar-spacer"></div>
@@ -227,7 +227,7 @@
 <div id="loading">
   <div class="loading-box">
     <div class="loading-spinner"></div>
-    <div class="loading-text">מריץ Push-Relabel...</div>
+    <div class="loading-text">מריץ Min-Cost Flow...</div>
     <div class="loading-sub" id="loading-step">אתחול גרף</div>
   </div>
 </div>
@@ -289,7 +289,7 @@
 
     <!-- גרף -->
     <div class="panel">
-      <div class="panel-title">🔗 גרף הזרימה — Push-Relabel</div>
+      <div class="panel-title">🔗 גרף הזרימה — Min-Cost Flow (Cost-Scaling Push-Relabel)</div>
       <iframe id="graph-iframe" src="/static/graph.html" title="ויזואליזציית גרף הזרימה"></iframe>
       <div class="legend" style="margin-top:0.6rem">
         <div class="legend-item">▲ נהג עם מהיר בטווח</div>
@@ -305,7 +305,7 @@
       <div class="algo-steps" id="algo-steps">
         <div class="step" id="step-1"><span class="step-num">1</span>Pre-proc</div>
         <div class="step" id="step-2"><span class="step-num">2</span>בניית גרף</div>
-        <div class="step" id="step-3"><span class="step-num">3</span>Push-Relabel</div>
+        <div class="step" id="step-3"><span class="step-num">3</span>Min-Cost Flow</div>
         <div class="step" id="step-4"><span class="step-num">4</span>הקצאות</div>
       </div>
 
@@ -340,7 +340,7 @@ async function runAlgorithm() {
 
   // הצג loading עם שלבים
   document.getElementById("loading").classList.add("show");
-  const stepMsgs = ["מריץ pre-processing...", "בונה גרף הזרימה...", "מריץ Push-Relabel...", "מחשב הקצאות..."];
+  const stepMsgs = ["מריץ pre-processing...", "בונה גרף הזרימה...", "מריץ Min-Cost Flow...", "מחשב הקצאות..."];
   let si = 0;
   setStep(1);
 

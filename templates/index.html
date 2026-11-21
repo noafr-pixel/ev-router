@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>EV Router — ירושלים</title>
+  <title>EV Router — ישראל</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
@@ -173,7 +173,7 @@
 <!-- ── טופ-בר ── -->
 <div class="topbar">
   <div class="topbar-inner">
-    <div class="logo">⚡ EV Router <span>ירושלים</span></div>
+    <div class="logo">⚡ EV Router <span>ישראל</span></div>
     <a class="admin-link" href="/admin">🖥 מנהל</a>
   </div>
 </div>
@@ -190,7 +190,7 @@
       <div class="location-row">
         <div class="autocomplete-wrap input-wrap">
           <span class="input-icon">📍</span>
-          <input type="text" id="inp-address" placeholder="הזן כתובת... (לדוגמה: יפו 5)" autocomplete="off" oninput="onAddressInput()">
+          <input type="text" id="inp-address" placeholder="הזן כתובת ועיר... (לדוגמה: הרצל 10, חיפה)" autocomplete="off" oninput="onAddressInput()">
           <div id="suggestions" class="suggestions-list" style="display:none"></div>
         </div>
         <button class="btn-gps" id="btn-gps" onclick="useGPS()" title="מיקום נוכחי">🎯</button>
@@ -475,7 +475,9 @@ function renderResults(data, userLat, userLon, socPct, batteryKwh) {
   const others = stations.filter(s => s.id !== recId);
 
   if (recommended.length > 0) {
-    recSection.innerHTML = `<div class="recommended-banner">✦ מומלץ על ידי אלגוריתם Push-Relabel</div>`;
+    const sk = (data.assignment && data.assignment.skipped_full) || 0;
+    const note = sk > 0 ? ` · ${sk === 1 ? "העמדה הקרובה ביותר מלאה" : sk + " עמדות קרובות יותר מלאות"} — הוצעה הבאה בתור` : " · העמדה הקרובה ביותר שפנויה";
+    recSection.innerHTML = `<div class="recommended-banner">✦ מומלץ (Min-Cost Flow)${note}</div>`;
     recSection.appendChild(buildStationCard(recommended[0], true, socPct, batteryKwh));
   }
 
