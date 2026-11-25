@@ -11,66 +11,58 @@ Flask הוא ספריית Python קטנה לבניית אתרים.
   הפונקציה מחזירה HTML (דף) או JSON (נתונים לJavaScript).
 
 הרצה:
-  pip install flask
-  python app.py
+  pip install -r requirements.txt
+  py app.py
   ← פותח דפדפן על http://localhost:5000
 
 הנתונים: כל עמדות הטעינה בארץ (stations_israel.json, מתוך מאגר משרד האנרגיה).
+דשבורד המנהל (/admin) מוגן בהתחברות — ראו auth.py.
 """
 
+import csv
+import io
 import os
 import random
 import socket
-import time
 import json as _json
-from datetime import datetime
+from zoneinfo import ZoneInfo
 from urllib.request import urlopen, Request
 from urllib.parse import quote
-from flask import Flask, render_template, request, jsonify
-from algorithm import run_algorithm, STATIONS, haversine
+from flask import Flask, Response, render_template, request, jsonify, session
+from algorithm import run_algorithm, STATIONS, STATIONS_BY_ID, haversine
+import db
+import auth
+from auth import admin_required
 
 app = Flask(__name__)
 
-# ── קובץ שמירה (שורד הפעלה מחדש של השרת) ──
-DATA_FILE = os.path.join(os.path.dirname(__file__), "ev_data.json")
+# ── התחברות מנהלים ──
+auth.init_app(app)
 
-def _load_data():
-    try:
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            d = _json.load(f)
-            return d.get("occupancy", {}), d.get("drivers", {}), d.get("counter", 0)
-    except Exception:
-        return {}, {}, 0
+# ── מסד נתונים (Supabase / Neon בענן, SQLite במחשב) ──
+db.init_db()
 
-def _save_data():
-    try:
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            _json.dump({"occupancy": OCCUPANCY, "drivers": RECENT_DRIVERS,
-                        "counter": _driver_counter[0]}, f, ensure_ascii=False)
-    except Exception:
-        pass
+ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
 
-_occ, _drv, _cnt = _load_data()
+def _ts_str(dt):
+    """שעה בשעון ישראל לתצוגה (HH:MM)."""
+    return dt.astimezone(ISRAEL_TZ).strftime("%H:%M") if dt else ""
 
-# עומס מדווח על ידי משתמשים: {station_id: count}
-OCCUPANCY = _occ
-
-# נהגים אמיתיים שהשתמשו במערכת: {driver_id: {id, lat, lon, ts, ts_str, assignment}}
-RECENT_DRIVERS = _drv
-_driver_counter = [_cnt]
-
-def _cleanup_drivers():
-    cutoff = time.time() - 3600
-    expired = [k for k, v in list(RECENT_DRIVERS.items()) if v["ts"] < cutoff]
-    for k in expired:
-        del RECENT_DRIVERS[k]
+def _enrich(assignment):
+    """משלים שדות לתצוגה (fast, operator) מתוך נתוני התחנות."""
+    if not assignment:
+        return None
+    s = STATIONS_BY_ID.get(assignment.get("station_id"))
+    if s:
+        assignment = {**assignment, "fast": s["fast"] > 0, "operator": s["operator"]}
+    return assignment
 
 def get_active_drivers():
-    _cleanup_drivers()
+    """נהגים פעילים = חיפושים מהשעה האחרונה (מתוך המסד)."""
     return [
-        {"id": v["id"], "lat": v["lat"], "lon": v["lon"],
-         "ts_str": v["ts_str"], "stored_assignment": v.get("assignment")}
-        for v in RECENT_DRIVERS.values()
+        {"id": r["driver_id"], "lat": r["lat"], "lon": r["lon"],
+         "ts_str": _ts_str(r["created_at"]), "stored_assignment": _enrich(r["assignment"])}
+        for r in db.recent_searches(60)
     ]
 
 # ──────────────────────────────────────────
@@ -103,11 +95,29 @@ def driver_page():
 
 
 # ──────────────────────────────────────────
-# דף מנהל — /admin
+# דף מנהל — /admin (רק למנהלים מחוברים)
 # ──────────────────────────────────────────
+_ADMIN_BAR = """
+<div id="admin-session-bar" dir="rtl" style="position:fixed;bottom:14px;left:14px;z-index:99999;
+  background:#0f2a22;color:#fff;font:13px 'Segoe UI',Arial,sans-serif;padding:8px 12px;
+  border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.3);display:flex;gap:10px;align-items:center">
+  <span>מחובר/ת: <b>{name}</b></span>
+  <a href="/admin/logout" style="color:#7fe0b4;text-decoration:none;font-weight:700">התנתקות</a>
+</div>
+"""
+
 @app.route("/admin")
+@admin_required
 def admin_page():
-    return render_template("admin.html")
+    html = render_template("admin.html")
+    # מוסיפים לדשבורד פס קטן עם שם המנהל וכפתור התנתקות
+    from markupsafe import escape
+    bar = _ADMIN_BAR.format(name=escape(session.get("admin", "")))
+    i = html.rfind("</body>")
+    html = html[:i] + bar + html[i:] if i != -1 else html + bar
+    resp = Response(html, mimetype="text/html")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 # ──────────────────────────────────────────
@@ -125,24 +135,13 @@ def api_find():
     lon = float(data.get("lon", 35.213))
     preference = data.get("preference", "any")
 
-    # שמור נהג אמיתי — כל חיפוש = רשומה נפרדת
-    _cleanup_drivers()
-    _driver_counter[0] += 1
-    driver_id = f"R{_driver_counter[0]:03d}"
-    RECENT_DRIVERS[driver_id] = {
-        "id": driver_id, "lat": lat, "lon": lon,
-        "ts": time.time(),
-        "ts_str": datetime.now().strftime("%H:%M"),
-        "assignment": None,  # יתעדכן אחרי הרצת האלגוריתם
-    }
-
     user_driver = {"id": "USER", "lat": lat, "lon": lon}
     all_drivers = [user_driver] + demo_drivers_near(lat, lon)
 
     # priority_driver="USER": הנהג שמחפש מקבל את התחנה הקרובה הפנויה,
     # ושאר הנהגים משובצים ב-Min-Cost Max-Flow
     result = run_algorithm(all_drivers, preference=preference, max_dist=5.0,
-                           occupancy_data=OCCUPANCY, priority_driver="USER")
+                           occupancy_data=db.get_occupancy(), priority_driver="USER")
 
     # מצא את ההקצאה של הנהג הנוכחי
     user_assignment = result["assignments"].get("USER")
@@ -159,9 +158,8 @@ def api_find():
             stations_with_dist.append({**s, "dist": round(dist, 2)})
     stations_with_dist.sort(key=lambda x: x["dist"])
 
-    # שמור את ההקצאה האמיתית לתצוגה בדשבורד המנהל
-    RECENT_DRIVERS[driver_id]["assignment"] = user_assignment
-    _save_data()
+    # שמירת החיפוש במסד הנתונים (כל חיפוש = שורה חדשה)
+    db.save_search(db.next_driver_id("R"), lat, lon, preference, "web", user_assignment)
 
     return jsonify({
         "assignment": user_assignment,
@@ -174,12 +172,13 @@ def api_find():
 # API: הרצת האלגוריתם לדשבורד מנהל
 # ──────────────────────────────────────────
 @app.route("/api/run", methods=["POST"])
+@admin_required
 def api_run():
     """
     מריץ את האלגוריתם על כל הנהגים הפעילים (שעה אחרונה).
     מחזיר תוצאות מלאות לדשבורד המנהל.
     """
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     preference = data.get("preference", "any")
 
     active = get_active_drivers()
@@ -196,7 +195,7 @@ def api_run():
 
     # הרץ אלגוריתם לסטטיסטיקות ועומס תחנות
     algo_drivers = [{"id": d["id"], "lat": d["lat"], "lon": d["lon"]} for d in active]
-    result = run_algorithm(algo_drivers, preference=preference, max_dist=5.0, occupancy_data=OCCUPANCY)
+    result = run_algorithm(algo_drivers, preference=preference, max_dist=5.0, occupancy_data=db.get_occupancy())
 
     # החלף הקצאות מחושבות בהקצאות האמיתיות שכל נהג קיבל בפועל
     stored_map = {d["id"]: d for d in active}
@@ -270,7 +269,7 @@ def api_suggest():
 
 
 # ──────────────────────────────────────────
-# API: דיווח עומס על תחנה
+# API: דיווח עומס על תחנה (פתוח לנהגים)
 # ──────────────────────────────────────────
 @app.route("/api/report", methods=["POST"])
 def api_report():
@@ -278,14 +277,49 @@ def api_report():
     station_id = data.get("station_id")
     count = int(data.get("count", 0))
     if station_id:
-        OCCUPANCY[station_id] = max(0, count)
-        _save_data()
-    return jsonify({"ok": True, "station_id": station_id, "count": OCCUPANCY.get(station_id, 0)})
+        db.report_occupancy(station_id, max(0, count))
+    return jsonify({"ok": True, "station_id": station_id, "count": db.get_occupancy().get(station_id, 0)})
 
 
 @app.route("/api/occupancy")
 def api_occupancy():
-    return jsonify(OCCUPANCY)
+    return jsonify(db.get_occupancy())
+
+
+# ──────────────────────────────────────────
+# API: היסטוריית כל החיפושים (למנהל בלבד)
+# ──────────────────────────────────────────
+@app.route("/api/history")
+@admin_required
+def api_history():
+    limit = request.args.get("limit", type=int) or 500
+    rows = db.all_searches(limit)
+    return jsonify({
+        "total": db.count_searches(),
+        "searches": [{
+            **{k: v for k, v in r.items() if k != "created_at"},
+            "created_at": r["created_at"].astimezone(ISRAEL_TZ).strftime("%d/%m/%Y %H:%M"),
+        } for r in rows],
+    })
+
+
+@app.route("/api/export.csv")
+@admin_required
+def api_export_csv():
+    """הורדת כל החיפושים כקובץ CSV (נפתח באקסל) — למנהל בלבד."""
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["מזהה", "נהג", "תאריך ושעה", "מקור", "קו רוחב", "קו אורך", "העדפה",
+                "עמדה", "שם עמדה", "עיר", "מרחק (ק\"מ)", "עמדות מלאות שדולגו"])
+    for r in db.all_searches():
+        a = r["assignment"] or {}
+        w.writerow([r["id"], r["driver_id"],
+                    r["created_at"].astimezone(ISRAEL_TZ).strftime("%d/%m/%Y %H:%M"),
+                    r["source"], r["lat"], r["lon"], r["preference"],
+                    a.get("station_id", ""), a.get("station_name", ""), a.get("city", ""),
+                    a.get("dist", ""), a.get("skipped_full", "")])
+    return Response("﻿" + buf.getvalue(), mimetype="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": "attachment; filename=ev_router_searches.csv"})
 
 
 # ──────────────────────────────────────────
@@ -303,16 +337,17 @@ def api_log_driver():
     lon = float(data.get("lon", 0))
     if not lat or not lon:
         return jsonify({"ok": False}), 400
-    _cleanup_drivers()
-    _driver_counter[0] += 1
-    driver_id = f"S{_driver_counter[0]:03d}"  # S = Standalone
-    RECENT_DRIVERS[driver_id] = {
-        "id": driver_id, "lat": lat, "lon": lon,
-        "ts": time.time(),
-        "ts_str": datetime.now().strftime("%H:%M"),
-        "assignment": data.get("assignment"),
-    }
-    _save_data()
+    # הקובץ העצמאי שולח רק station_id — משלימים את הפרטים מנתוני התחנות
+    asg = data.get("assignment")
+    if isinstance(asg, str):
+        s = STATIONS_BY_ID.get(asg)
+        asg = {"station_id": s["id"], "station_name": s["name"], "city": s.get("city", "")} if s else None
+        if asg and data.get("dist") is not None:
+            asg["dist"] = data.get("dist")
+        if asg and data.get("skipped_full") is not None:
+            asg["skipped_full"] = data.get("skipped_full")
+    driver_id = db.next_driver_id("S")  # S = Standalone
+    db.save_search(driver_id, lat, lon, data.get("preference"), "standalone", asg)
     r = jsonify({"ok": True, "driver_id": driver_id})
     r.headers["Access-Control-Allow-Origin"] = "*"
     return r
@@ -331,9 +366,13 @@ def _get_local_ip():
 
 if __name__ == "__main__":
     local_ip = _get_local_ip()
+    n_admins = len(auth.load_admins())
     print("=" * 50)
     print(f"  EV Router Israel — {len(STATIONS)} אתרי טעינה")
+    print(f"  מסד נתונים: {db.DB_KIND} · {db.count_searches()} חיפושים שמורים")
+    print(f"  מנהלים מוגדרים: {n_admins}" + ("" if n_admins else "  ← צרי admin_users.txt"))
     print(f"  http://localhost:5000      ← מחשב")
+    print(f"  http://localhost:5000/admin ← דשבורד מנהל")
     print(f"  http://{local_ip}:5000  ← פלאפון (אותה רשת WiFi)")
     print("=" * 50)
     app.run(debug=True, port=5000, host="0.0.0.0")
