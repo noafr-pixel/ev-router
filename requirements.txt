@@ -1,2 +1,5 @@
 flask
 gunicorn
+sqlalchemy
+tzdata
+psycopg[binary]; platform_system != "Windows"
