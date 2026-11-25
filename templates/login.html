@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>כניסת מנהל — EV Router</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    font-family: "Segoe UI", Arial, sans-serif; background: #0f2a22; color: #1c2b26; padding: 16px;
+  }
+  .card {
+    width: 100%; max-width: 380px; background: #fff; border-radius: 14px;
+    padding: 32px 28px; box-shadow: 0 12px 40px rgba(0,0,0,.35);
+  }
+  .logo { font-size: 15px; font-weight: 700; color: #1d8a5f; letter-spacing: .3px; }
+  h1 { font-size: 22px; margin: 6px 0 22px; }
+  label { display: block; font-size: 14px; font-weight: 600; margin: 14px 0 6px; }
+  input {
+    width: 100%; padding: 11px 12px; font-size: 16px; border: 1.5px solid #cfd8d4;
+    border-radius: 8px; outline: none; font-family: inherit;
+  }
+  input:focus { border-color: #1d8a5f; box-shadow: 0 0 0 3px rgba(29,138,95,.15); }
+  button {
+    width: 100%; margin-top: 22px; padding: 12px; font-size: 16px; font-weight: 700;
+    color: #fff; background: #1d8a5f; border: 0; border-radius: 8px; cursor: pointer;
+  }
+  button:hover { background: #17724e; }
+  .error {
+    background: #fdecec; color: #a42020; border: 1px solid #f3c2c2;
+    padding: 10px 12px; border-radius: 8px; font-size: 14px; margin-bottom: 6px;
+  }
+  .back { display: block; text-align: center; margin-top: 18px; font-size: 14px; color: #56706a; }
+</style>
+</head>
+<body>
+  <form class="card" method="post" action="{{ url_for('admin_login') }}">
+    <div class="logo">⚡ EV Router</div>
+    <h1>כניסה לדשבורד המנהל</h1>
+
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+    <input type="hidden" name="next" value="{{ next }}">
+
+    <label for="username">שם משתמש</label>
+    <input id="username" name="username" value="{{ username }}" autocomplete="username" required autofocus>
+
+    <label for="password">סיסמה</label>
+    <input id="password" name="password" type="password" autocomplete="current-password"
+           inputmode="numeric" required>
+
+    <button type="submit">כניסה</button>
+    <a class="back" href="/">← חזרה לדף הנהג</a>
+  </form>
+</body>
+</html>
