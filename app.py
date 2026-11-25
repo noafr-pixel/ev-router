@@ -24,6 +24,7 @@ import io
 import os
 import random
 import socket
+import time
 import json as _json
 from zoneinfo import ZoneInfo
 from urllib.request import urlopen, Request
@@ -220,52 +221,94 @@ def api_stations():
 
 
 # ──────────────────────────────────────────
-# API: גיאוקודינג כתובת → קואורדינטות (כל הארץ)
+# גיאוקודינג: כתובת → קואורדינטות
 # ──────────────────────────────────────────
+# שני שירותי מפות חינמיים של OpenStreetMap:
+#   Nominatim — מדויק, אבל מגביל לבקשה אחת בשנייה וחוסם שרתי ענן "רועשים".
+#   Photon    — בנוי להשלמה תוך כדי הקלדה. משמש גיבוי כש-Nominatim לא עונה.
+# countrycodes=il,ps: ב-OpenStreetMap יישובים כמו מעלה אדומים, אריאל ואפרת
+# מסומנים כ-ps, ולכן חיפוש עם il בלבד לא מצא אותם.
+_UA = "EV-Router-Israel/1.1 (academic project; https://ev-router-jerusalem.onrender.com)"
+_BBOX = (34.2, 29.4, 35.95, 33.4)          # מלבן שמכסה את ישראל ויהודה ושומרון
+_geo_cache = {}                            # אותה שאלה → אותה תשובה, בלי לפנות שוב לשירות
+_last_nominatim = [0.0]
+
+
+def _fetch_json(url, timeout=6):
+    with urlopen(Request(url, headers={"User-Agent": _UA, "Accept-Language": "he"}), timeout=timeout) as resp:
+        return _json.loads(resp.read())
+
+
+def _nominatim(q, limit):
+    # לפי כללי Nominatim: לא יותר מבקשה בשנייה
+    wait = 1.0 - (time.time() - _last_nominatim[0])
+    if wait > 0:
+        time.sleep(wait)
+    _last_nominatim[0] = time.time()
+    url = ("https://nominatim.openstreetmap.org/search?q=" + quote(q) +
+           f"&format=json&limit={limit}&countrycodes=il,ps&accept-language=he")
+    return [{"lat": float(r["lat"]), "lon": float(r["lon"]), "display": r.get("display_name", q)}
+            for r in _fetch_json(url)]
+
+
+def _photon(q, limit):
+    url = ("https://photon.komoot.io/api/?q=" + quote(q) + f"&limit={limit}"
+           "&bbox=" + ",".join(map(str, _BBOX)))
+    out = []
+    for f in _fetch_json(url).get("features", []):
+        lon, lat = f["geometry"]["coordinates"]
+        p = f.get("properties", {})
+        street = " ".join(x for x in (p.get("street") or p.get("name"), p.get("housenumber")) if x)
+        parts = [street, p.get("city") or p.get("district"), p.get("state")]
+        display = ", ".join(dict.fromkeys(x for x in parts if x)) or p.get("name") or q
+        out.append({"lat": lat, "lon": lon, "display": display})
+    return out
+
+
+def geocode(q, limit=1, prefer="nominatim"):
+    """מחזיר רשימת תוצאות [{lat, lon, display}]. מנסה שירות אחד, ואם נכשל — את השני."""
+    key = (q.casefold(), limit)
+    if key in _geo_cache:
+        return _geo_cache[key]
+    order = [_nominatim, _photon] if prefer == "nominatim" else [_photon, _nominatim]
+    results = []
+    for service in order:
+        try:
+            results = service(q, limit)
+            if results:
+                break
+        except Exception as e:
+            # יופיע ב-Render ← Logs, כדי שיהיה אפשר לראות למה חיפוש נכשל
+            print(f"[geocode] {service.__name__} failed for {q!r}: {e}", flush=True)
+    if results:
+        if len(_geo_cache) > 2000:
+            _geo_cache.clear()
+        _geo_cache[key] = results
+    return results
+
+
 @app.route("/api/geocode")
 def api_geocode():
     q = request.args.get("q", "").strip()
     if not q:
         return jsonify({"error": "no query"}), 400
-
-    url = "https://nominatim.openstreetmap.org/search?q=" + quote(q) + "&format=json&limit=1&countrycodes=il"
-    req = Request(url, headers={"User-Agent": "EV-Router-Israel/1.0"})
-    try:
-        with urlopen(req, timeout=5) as resp:
-            results = _json.loads(resp.read())
-    except Exception:
-        return jsonify({"error": "geocoding failed"}), 500
-
+    results = geocode(q, limit=1, prefer="nominatim")
     if not results:
         return jsonify({"error": "not found"}), 404
-
-    return jsonify({
-        "lat": float(results[0]["lat"]),
-        "lon": float(results[0]["lon"]),
-        "display_name": results[0].get("display_name", q)
-    })
+    r = results[0]
+    return jsonify({"lat": r["lat"], "lon": r["lon"], "display_name": r["display"]})
 
 
 # ──────────────────────────────────────────
-# API: הצעות השלמה לכתובת
+# API: הצעות השלמה לכתובת (תוך כדי הקלדה)
 # ──────────────────────────────────────────
 @app.route("/api/suggest")
 def api_suggest():
     q = request.args.get("q", "").strip()
     if len(q) < 2:
         return jsonify([])
-
-    url = "https://nominatim.openstreetmap.org/search?q=" + quote(q) + "&format=json&limit=5&countrycodes=il&accept-language=he"
-    req = Request(url, headers={"User-Agent": "EV-Router-Israel/1.0"})
-    try:
-        with urlopen(req, timeout=5) as resp:
-            results = _json.loads(resp.read())
-        return jsonify([
-            {"lat": float(r["lat"]), "lon": float(r["lon"]), "display": r["display_name"]}
-            for r in results
-        ])
-    except Exception:
-        return jsonify([])
+    # להשלמה תוך כדי הקלדה — Photon קודם, כדי לא לשרוף את המכסה של Nominatim
+    return jsonify(geocode(q, limit=5, prefer="photon"))
 
 
 # ──────────────────────────────────────────
